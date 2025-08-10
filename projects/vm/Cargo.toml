@@ -1,0 +1,9 @@
+[package]
+name = "vm"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+collections = {path = "../../lib/collections"}
+functional = {path = "../../lib/functional"}
+parser = {path = "../../lib/parser"}
