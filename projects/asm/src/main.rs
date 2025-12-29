@@ -12,7 +12,7 @@ use translation::*;
 mod instruction;
 mod translation;
 
-fn preprocess<'a>(lines: &'a [&'a str]) -> Result<HashMap<String, u32>, &'a str> {
+fn preprocess<'a>(lines: &[&str]) -> Result<HashMap<String, u32>, &'a str> {
     let instruction = instruction();
     let symbol_table = symbol_table();
 
@@ -35,7 +35,7 @@ fn preprocess<'a>(lines: &'a [&'a str]) -> Result<HashMap<String, u32>, &'a str>
 }
 
 fn assemble<'a, D: Deque<String>>(
-    lines: &'a [&'a str],
+    lines: &[&str],
     symbol_table: HashMap<String, u32>,
     code: D,
 ) -> Result<D, &'a str> {
@@ -94,8 +94,8 @@ fn assemble<'a, D: Deque<String>>(
         .map(|(_, _, code)| code)
 }
 
-fn run<'a, D: Deque<String>>(input: &'a str, output: &'a str, code: D) {
-    IO::<String>::read_file(&input)
+fn run<D: Deque<String>>(input: &str, output: &str, code: D) {
+    IO::<String>::read_file(input)
         .flat_map(|content| {
             let assembly = content.lines().collect::<Vec<&str>>();
             preprocess(&assembly).map_or_else(
@@ -109,7 +109,7 @@ fn run<'a, D: Deque<String>>(input: &'a str, output: &'a str, code: D) {
                                 .map(|s| s.as_ref().clone())
                                 .collect::<Vec<String>>()
                                 .join("\n");
-                            IO::<String>::write_file(&output, lines)
+                            IO::<String>::write_file(output, lines)
                         },
                     )
                 },
