@@ -2,18 +2,33 @@ use crate::Ref;
 
 use super::list;
 
-pub struct Deque<T> {
+pub trait Deque<T>: Sized + Clone {
+    type Iter: Iterator<Item = Ref<T>>;
+
+    fn empty() -> Self;
+    fn push_front(&self, value: T) -> Self;
+    fn push_back(&self, value: T) -> Self;
+    fn pop_front(&self) -> Option<(Ref<T>, Self)>;
+    fn pop_back(&self) -> Option<(Ref<T>, Self)>;
+    fn front(&self) -> Option<Ref<T>>;
+    fn back(&self) -> Option<Ref<T>>;
+    fn is_empty(&self) -> bool;
+    fn len(&self) -> usize;
+    fn iter(&self) -> Self::Iter;
+}
+
+pub struct BankersDeque<T> {
     head: list::List<T>,
     tail: list::List<T>,
 }
 
-impl<T> Default for Deque<T> {
+impl<T> Default for BankersDeque<T> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<T> Clone for Deque<T> {
+impl<T> Clone for BankersDeque<T> {
     fn clone(&self) -> Self {
         Self {
             head: self.head.clone(),
@@ -22,7 +37,7 @@ impl<T> Clone for Deque<T> {
     }
 }
 
-impl<T> Deque<T> {
+impl<T> BankersDeque<T> {
     pub fn new() -> Self {
         Self {
             head: list::List::new(),
@@ -31,8 +46,14 @@ impl<T> Deque<T> {
     }
 }
 
-impl<T> Deque<T> {
-    pub fn push_front(&self, value: T) -> Self {
+impl<T: Clone> Deque<T> for BankersDeque<T> {
+    type Iter = BankersDequeIterator<T>;
+
+    fn empty() -> Self {
+        Self::new()
+    }
+
+    fn push_front(&self, value: T) -> Self {
         Self {
             head: self.head.push_front(value),
             tail: self.tail.clone(),
@@ -40,7 +61,7 @@ impl<T> Deque<T> {
         .balance()
     }
 
-    pub fn push_back(&self, value: T) -> Self {
+    fn push_back(&self, value: T) -> Self {
         Self {
             head: self.head.clone(),
             tail: self.tail.push_front(value),
@@ -48,54 +69,95 @@ impl<T> Deque<T> {
         .balance()
     }
 
-    pub fn pop_front(&self) -> Option<(&T, Self)> {
+    fn pop_front(&self) -> Option<(Ref<T>, Self)> {
         if self.is_empty() {
             None
         } else if self.head.is_empty() {
-            let (a, b) = self.tail.pop_front().unwrap();
+            let (a, b) = self.tail.pop_front_rc()?;
             Some((
                 a,
                 Self {
                     head: self.head.clone(),
                     tail: b,
-                },
+                }
+                .balance(),
             ))
         } else {
-            let (a, b) = self.head.pop_front().unwrap();
+            let (a, b) = self.head.pop_front_rc()?;
             Some((
                 a,
                 Self {
                     head: b,
                     tail: self.tail.clone(),
-                },
+                }
+                .balance(),
             ))
         }
     }
 
-    pub fn pop_back(&self) -> Option<(&T, Self)> {
+    fn pop_back(&self) -> Option<(Ref<T>, Self)> {
         if self.is_empty() {
             None
         } else if self.tail.is_empty() {
-            let (a, b) = self.head.pop_front().unwrap();
+            let (a, b) = self.head.pop_front_rc()?;
             Some((
                 a,
                 Self {
                     head: b,
                     tail: self.tail.clone(),
-                },
+                }
+                .balance(),
             ))
         } else {
-            let (a, b) = self.tail.pop_front().unwrap();
+            let (a, b) = self.tail.pop_front_rc()?;
             Some((
                 a,
                 Self {
                     head: self.head.clone(),
                     tail: b,
-                },
+                }
+                .balance(),
             ))
         }
     }
 
+    fn front(&self) -> Option<Ref<T>> {
+        if self.is_empty() {
+            None
+        } else if self.head.is_empty() {
+            self.tail.front_rc()
+        } else {
+            self.head.front_rc()
+        }
+    }
+
+    fn back(&self) -> Option<Ref<T>> {
+        if self.is_empty() {
+            None
+        } else if self.tail.is_empty() {
+            self.head.front_rc()
+        } else {
+            self.tail.front_rc()
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    fn len(&self) -> usize {
+        self.head.len() + self.tail.len()
+    }
+
+    fn iter(&self) -> Self::Iter {
+        BankersDequeIterator {
+            head_iter: self.head.iter(),
+            tail_iter: self.tail.reverse().iter(),
+        }
+    }
+}
+
+impl<T> BankersDeque<T> {
     fn balance(&self) -> Self {
         if self.head.is_empty() {
             let (tail, rev_head) = self.tail.split();
@@ -109,36 +171,18 @@ impl<T> Deque<T> {
             self.clone()
         }
     }
-
-    fn is_empty(&self) -> bool {
-        self.length() == 0
-    }
-
-    fn length(&self) -> usize {
-        self.head.length() + self.tail.length()
-    }
-
-    pub fn iter(&self) -> DequeIterator<T> {
-        DequeIterator {
-            head_iter: self.head.iter(),
-            tail_iter: self.tail.reverse().iter(),
-        }
-    }
 }
 
-pub struct DequeIterator<T> {
+pub struct BankersDequeIterator<T> {
     head_iter: list::ListIterator<T>,
     tail_iter: list::ListIterator<T>,
 }
 
-impl<T> Iterator for DequeIterator<T> {
+impl<T> Iterator for BankersDequeIterator<T> {
     type Item = Ref<T>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self.head_iter.next() {
-            Some(value) => Some(value),
-            None => self.tail_iter.next(),
-        }
+        self.head_iter.next().or_else(|| self.tail_iter.next())
     }
 }
 
@@ -147,10 +191,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_deque_push_pop() {
-        let deque: Deque<i32> = Deque::new();
+    fn test_push_pop() {
+        let deque: BankersDeque<i32> = BankersDeque::new();
         let deque = deque.push_front(1).push_back(2).push_front(0).push_back(3);
-        assert_eq!(deque.length(), 4);
+        assert_eq!(deque.len(), 4);
 
         let (value, deque) = deque.pop_front().unwrap();
         assert_eq!(*value, 0);
@@ -161,14 +205,14 @@ mod tests {
         let (value, deque) = deque.pop_back().unwrap();
         assert_eq!(*value, 2);
 
-        assert_eq!(deque.length(), 0);
+        assert_eq!(deque.len(), 0);
         assert!(deque.pop_front().is_none());
         assert!(deque.pop_back().is_none());
     }
 
     #[test]
-    fn test_deque_iter() {
-        let deque: Deque<String> = Deque::new();
+    fn test_iter() {
+        let deque: BankersDeque<String> = BankersDeque::new();
         let deque = deque
             .push_front("World".to_string())
             .push_front("Hello".to_string());
