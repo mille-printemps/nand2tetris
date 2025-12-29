@@ -34,12 +34,13 @@ fn preprocess<'a>(lines: &'a [&'a str]) -> Result<HashMap<String, u32>, &'a str>
         .map(|(_, symbol_table)| symbol_table)
 }
 
-fn assemble<'a>(
+fn assemble<'a, D: Deque<String>>(
     lines: &'a [&'a str],
     symbol_table: HashMap<String, u32>,
-) -> Result<Deque<String>, &'a str> {
+    code: D,
+) -> Result<D, &'a str> {
     let available_address = 16;
-    let code = Deque::new();
+    let code = code;
     let instruction = instruction();
     let dest_table = dest_table();
     let comp_table = comp_table();
@@ -93,14 +94,14 @@ fn assemble<'a>(
         .map(|(_, _, code)| code)
 }
 
-fn run<'a>(input: &'a str, output: &'a str) {
+fn run<'a, D: Deque<String>>(input: &'a str, output: &'a str, code: D) {
     IO::<String>::read_file(&input)
         .flat_map(|content| {
             let assembly = content.lines().collect::<Vec<&str>>();
             preprocess(&assembly).map_or_else(
                 |error| IO::Error(error.to_string()),
                 |symbol_table| {
-                    assemble(&assembly, symbol_table).map_or_else(
+                    assemble::<D>(&assembly, symbol_table, code).map_or_else(
                         |error| IO::Error(error.to_string()),
                         |binary| {
                             let lines = binary
@@ -138,7 +139,10 @@ fn main() {
     const STACK_SIZE: usize = 16 * 1024 * 1024;
     std::thread::Builder::new()
         .stack_size(STACK_SIZE)
-        .spawn(move || run(&args[1], &output))
+        .spawn(move || {
+            let code = BankersDeque::new();
+            run(&args[1], &output, code)
+        })
         .unwrap()
         .join()
         .unwrap();
