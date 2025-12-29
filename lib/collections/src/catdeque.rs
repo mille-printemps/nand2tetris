@@ -257,7 +257,7 @@ impl<T: Clone + 'static> Iterator for CatenableDequeIterator<T> {
                                 self.stack.push(IterFrame::Data(tail.iter()));
 
                                 // 2. middle (Recursive Nodes)
-                                let forced_middle = LazyState::force(&middle);
+                                let forced_middle = LazyState::force(middle);
                                 self.stack.push(IterFrame::Node(forced_middle.iter()));
 
                                 // 1. head (Data)
