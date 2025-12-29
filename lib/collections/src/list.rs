@@ -70,8 +70,8 @@ impl<T> List<T> {
         let mut first = List::<T>::new();
         let mut second = List::<T>::new();
         let mut current = self.clone();
-        let half = self.length() / 2;
-        let other_half = self.length() - half;
+        let half = self.len() / 2;
+        let other_half = self.len() - half;
         for _ in 0..half {
             let (value_rc, new_list) = current.pop_front_rc().unwrap();
             first = first.push_front_rc(value_rc);
@@ -124,10 +124,10 @@ impl<T> List<T> {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.length() == 0
+        self.len == 0
     }
 
-    pub fn length(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.len
     }
 
@@ -163,6 +163,13 @@ impl<T> List<T> {
         }
     }
 
+    pub fn front_rc(&self) -> Option<Ref<T>> {
+        match self.head.as_ref() {
+            ListNode::Empty => None,
+            ListNode::Value { value, .. } => Some(value.clone()),
+        }
+    }
+
     pub fn front(&self) -> Option<&T> {
         self.pop_front().map(|(e, _)| e)
     }
@@ -193,26 +200,26 @@ mod tests {
             .push_front(2)
             .push_front(1);
         let (a, b) = l.split();
-        assert_eq!(a.length(), 2);
-        assert_eq!(b.length(), 2);
+        assert_eq!(a.len(), 2);
+        assert_eq!(b.len(), 2);
     }
 
     #[test]
     fn test_list() {
         let empty_list = List::new();
-        assert_eq!(empty_list.length(), 0);
+        assert_eq!(empty_list.len(), 0);
         assert!(empty_list.is_empty());
         assert!(empty_list.pop_front().is_none());
         assert!(empty_list.front().is_none());
 
         let list = empty_list.push_front(123).push_front(987);
-        assert_eq!(list.length(), 2);
+        assert_eq!(list.len(), 2);
         assert!(!list.is_empty());
         assert_eq!(list.front(), Some(&987));
 
         let (popped_element, remaining_list) = list.pop_front().unwrap();
         assert_eq!(*popped_element, 987);
-        assert_eq!(remaining_list.length(), 1);
+        assert_eq!(remaining_list.len(), 1);
         assert_eq!(remaining_list.front(), Some(&123));
     }
 
