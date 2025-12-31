@@ -140,7 +140,7 @@ fn main() {
     std::thread::Builder::new()
         .stack_size(STACK_SIZE)
         .spawn(move || {
-            let code = BankersDeque::new();
+            let code = BankersDeque::empty();
             run(&args[1], &output, code)
         })
         .unwrap()
