@@ -38,14 +38,14 @@ impl<'a, A: 'a> Functor<'a, A> for IO<'a, A> {
 }
 
 impl<'a, A> IO<'a, A> {
-    pub fn read_file(filename: &'a str) -> IO<String> {
+    pub fn read_file(filename: String) -> IO<'a, String> {
         IO::Suspend(Box::new(move || match fs::read_to_string(filename) {
             Ok(content) => IO::Return(content),
             Err(e) => IO::Error(e.to_string()),
         }))
     }
 
-    pub fn write_file(filename: &'a str, content: String) -> IO<()> {
+    pub fn write_file(filename: String, content: String) -> IO<'a, ()> {
         IO::Suspend(Box::new(move || match fs::File::create(filename) {
             Ok(file) => {
                 let mut writer = BufWriter::new(file);
@@ -74,7 +74,7 @@ mod tests {
 
     #[test]
     fn file_reader() {
-        let file_io = IO::<String>::read_file(file!());
+        let file_io = IO::<String>::read_file(file!().to_string());
         let result = file_io.map(|content| content.to_uppercase()).unsafe_run();
         assert_eq!(true, result.unwrap().starts_with("USE"))
     }
