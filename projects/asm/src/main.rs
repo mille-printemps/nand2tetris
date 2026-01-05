@@ -94,7 +94,7 @@ fn assemble<'a, D: Deque<String>>(
         .map(|(_, _, code)| code)
 }
 
-fn run<D: Deque<String>>(input: &str, output: &str, code: D) {
+fn run<D: Deque<String>>(input: String, output: String, code: D) {
     IO::<String>::read_file(input)
         .flat_map(|content| {
             let assembly = content.lines().collect::<Vec<&str>>();
@@ -116,7 +116,7 @@ fn run<D: Deque<String>>(input: &str, output: &str, code: D) {
             )
         })
         .unsafe_run()
-        .unwrap_or_else(|_| panic!("Failed to write {}", output));
+        .unwrap_or_else(|e| panic!("Failed to process a file: {}", e));
 }
 
 fn main() {
@@ -141,7 +141,7 @@ fn main() {
         .stack_size(STACK_SIZE)
         .spawn(move || {
             let code = BankersDeque::empty();
-            run(&args[1], &output, code)
+            run(args[1].clone(), output, code)
         })
         .unwrap()
         .join()
