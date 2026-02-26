@@ -133,3 +133,145 @@ M=!M
 ({label})
 @SP
 M=M+1"#;
+
+// For "if-goto"
+pub const IF_GOTO: &str = r#"@SP
+M=M-1
+A=M
+D=M
+@{dontgoto}
+D;JEQ
+@{label}
+0;JMP
+({dontgoto})"#;
+
+// For "function"
+pub const FUNCTION: &str = r#"@0
+D=A
+@SP
+A=M
+M=D
+@SP
+M=M+1"#;
+
+// For "call"
+pub const CALL: &str = r#"// save return address to stack
+@{caller}$ret.{callee_index}
+D=A
+@SP
+A=M
+M=D
+@SP
+M=M+1
+// save LCL
+@LCL
+D=M
+@SP
+A=M
+M=D
+@SP
+M=M+1
+// save ARG
+@ARG
+D=M
+@SP
+A=M
+M=D
+@SP
+M=M+1
+// save THIS
+@THIS
+D=M
+@SP
+A=M
+M=D
+@SP
+M=M+1
+// save THAT
+@THAT
+D=M
+@SP
+A=M
+M=D
+@SP
+M=M+1
+// ARG = SP - 5 - nArgs
+D=M
+@5
+D=D-A
+@{nargs}
+D=D-A
+@ARG
+M=D
+// set LCL to SP
+@SP
+D=M
+@LCL
+M=D
+// jump to {callee}
+@{callee}
+0;JMP
+({caller}$ret.{callee_index})"#;
+
+// For "return"
+pub const RETURN: &str = r#"// endFrame (R13) = LCL
+@LCL
+D=M
+@R13
+M=D
+// retAddr (R14) = *(endFrame - 5)
+@5
+A=D-A
+D=M
+@R14
+M=D
+// *ARG = pop()
+@SP
+M=M-1
+A=M
+D=M
+@ARG
+A=M
+M=D
+// SP = ARG + 1
+@ARG
+D=M
+@SP
+M=D+1
+// THAT = *(endFrame - 1)
+@R13
+M=M-1
+A=M
+D=M
+@THAT
+M=D
+// THIS = *(endFrame - 2)
+@R13
+M=M-1
+A=M
+D=M
+@THIS
+M=D
+// ARG = *(endFrame - 3)
+@R13
+M=M-1
+A=M
+D=M
+@ARG
+M=D
+// LCL = *(endFrame - 4)
+@R13
+M=M-1
+A=M
+D=M
+@LCL
+M=D
+// goto retAddr
+@R14
+A=M
+0;JMP"#;
+
+pub const BOOTSTRAP: &str = r#"@256
+D=A
+@SP
+M=D"#;
