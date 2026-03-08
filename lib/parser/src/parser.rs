@@ -262,6 +262,28 @@ pub fn any_char(input: &str) -> ParseResult<char> {
     }
 }
 
+/// Consumes input up to and including `sentinel`, returning the text before it.
+/// Fails if `sentinel` is not found.
+pub fn take_until<'a>(sentinel: &'static str) -> impl Parser<'a, &'a str> {
+    move |input: &'a str| match input.find(sentinel) {
+        Some(i) => Ok((&input[i + sentinel.len()..], &input[..i])),
+        None => Err(input),
+    }
+}
+
+/// Parses a `/* ... */` block comment, discarding its content.
+pub fn block_comment<'a>() -> impl Parser<'a, ()> {
+    right(match_literal("/*"), take_until("*/")).map(|_| ())
+}
+
+/// Parses a `// ...` line comment up to (and including) the newline, or to EOF.
+pub fn line_comment<'a>() -> impl Parser<'a, ()> {
+    right(
+        match_literal("//"),
+        either(take_until("\n").map(|_| ()), |_: &'a str| Ok(("", ()))),
+    )
+}
+
 fn comment(input: &str) -> ParseResult<&str> {
     match input.find("//") {
         Some(index) => Ok((&input[0..index], &input[index + 2..])),
@@ -471,6 +493,27 @@ mod tests {
             )),
             assignments(identifier).parse("   R1=A1   R2=A2")
         )
+    }
+
+    #[test]
+    fn take_until_parser() {
+        assert_eq!(Ok(("rest", "hello")), take_until("*/").parse("hello*/rest"));
+        assert_eq!(Ok(("", "")), take_until("*/").parse("*/"));
+        assert!(take_until("*/").parse("no sentinel here").is_err());
+    }
+
+    #[test]
+    fn block_comment_parser() {
+        assert_eq!(Ok(("rest", ())), block_comment().parse("/* comment */rest"));
+        assert_eq!(Ok(("rest", ())), block_comment().parse("/* multi\nline\n*/rest"));
+        assert!(block_comment().parse("not a comment").is_err());
+    }
+
+    #[test]
+    fn line_comment_parser() {
+        assert_eq!(Ok(("rest", ())), line_comment().parse("// comment\nrest"));
+        assert_eq!(Ok(("", ())), line_comment().parse("// comment at eof"));
+        assert!(line_comment().parse("not a comment").is_err());
     }
 
     #[test]
