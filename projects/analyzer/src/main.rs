@@ -7,9 +7,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process;
 
-mod token;
-
-use token::{tokenize, tokens_to_xml, Token};
+use tokenizer::token::{tokenize, tokens_to_xml, Token};
 
 fn output_path(input: &str) -> String {
     let path = PathBuf::from(input);
