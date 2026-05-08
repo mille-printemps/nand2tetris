@@ -2,7 +2,6 @@ use std::{
     collections::hash_map::DefaultHasher,
     fmt::Debug,
     hash::{Hash, Hasher},
-    marker::PhantomData,
 };
 
 use crate::trie::Trie;
@@ -10,7 +9,6 @@ use crate::trie::Trie;
 #[derive(Clone)]
 pub struct HashMap<K: PartialEq, V = ()> {
     trie: Trie<bool, KeyValue<K, V>>,
-    phantom: PhantomData<K>,
 }
 
 pub type HashSet<K> = HashMap<K, ()>;
@@ -29,10 +27,11 @@ impl<K: PartialEq, V> PartialEq for KeyValue<K, V> {
 
 impl<K: Hash + PartialEq, V> HashMap<K, V> {
     pub fn new() -> HashMap<K, V> {
-        HashMap {
-            trie: Trie::new(),
-            phantom: PhantomData,
-        }
+        HashMap { trie: Trie::new() }
+    }
+
+    pub fn empty() -> HashMap<K, V> {
+        Self::new()
     }
 
     pub fn insert(&self, key: K, value: V) -> Self {
@@ -44,7 +43,6 @@ impl<K: Hash + PartialEq, V> HashMap<K, V> {
                     value: Some(value),
                 },
             ),
-            phantom: PhantomData,
         }
     }
 
@@ -60,10 +58,7 @@ impl<K: Hash + PartialEq, V> HashMap<K, V> {
     pub fn remove(&self, key: K) -> Option<Self> {
         self.trie
             .remove_store(Self::get_bits(&key), &KeyValue { key, value: None })
-            .map(|trie| HashMap {
-                trie,
-                phantom: PhantomData,
-            })
+            .map(|trie| HashMap { trie })
     }
 
     fn get_bits(key: &K) -> Vec<bool> {
