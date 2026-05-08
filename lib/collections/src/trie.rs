@@ -1,7 +1,11 @@
+use crate::list::List;
 use crate::Ref;
+
+type Nodes<T, U> = List<(T, Ref<Trie<T, U>>)>;
+
 pub struct Trie<T = u8, U = bool> {
-    pub(crate) value: Vec<Ref<U>>,
-    pub(crate) nodes: Vec<(T, Ref<Trie<T, U>>)>,
+    pub(crate) value: List<U>,
+    pub(crate) nodes: Nodes<T, U>,
 }
 
 impl<T: Clone, U> Clone for Trie<T, U> {
@@ -16,79 +20,68 @@ impl<T: Clone, U> Clone for Trie<T, U> {
 impl<T: PartialEq + Clone, U: PartialEq> Trie<T, U> {
     pub fn new() -> Trie<T, U> {
         Trie {
-            value: Vec::new(),
-            nodes: Vec::new(),
+            value: List::new(),
+            nodes: List::new(),
         }
+    }
+
+    pub fn empty() -> Trie<T, U> {
+        Self::new()
     }
 
     pub fn insert_store<K: AsRef<[T]>>(&self, key: K, store: U) -> Self {
         let key_ref = key.as_ref();
-        let mut new_trie = self.clone();
         if key_ref.is_empty() {
-            new_trie.value.push(Ref::new(store));
-            return new_trie;
+            return Trie {
+                value: self.value.push_front(store),
+                nodes: self.nodes.clone(),
+            };
         }
         let head = &key_ref[0];
         let tail = &key_ref[1..];
-        for (k, v) in new_trie.nodes.iter_mut() {
-            if k == head {
-                *v = Ref::new(v.insert_store(tail, store));
-                return new_trie;
-            }
+        Trie {
+            value: self.value.clone(),
+            nodes: insert_into_nodes(&self.nodes, head, tail, store),
         }
-        new_trie.nodes.push((
-            head.clone(),
-            Ref::new(Trie::new().insert_store(tail, store)),
-        ));
-        new_trie
     }
 
     pub fn get_store<K: AsRef<[T]>>(&self, key: K) -> Option<Box<[&U]>> {
         let key_ref = key.as_ref();
         if key_ref.is_empty() {
-            let mut vr = Vec::new();
-            for v in self.value.iter() {
-                vr.push(v.as_ref());
+            if self.value.is_empty() {
+                return None;
             }
-            if vr.is_empty() {
-                return Option::None;
-            }
-            return Option::Some(vr.into_boxed_slice());
+            let collected: Vec<&U> = self.value.iter_ref().collect();
+            return Some(collected.into_boxed_slice());
         }
         let head = &key_ref[0];
         let tail = &key_ref[1..];
-        for (k, v) in &self.nodes {
+        for (k, v) in self.nodes.iter_ref() {
             if k == head {
                 return v.get_store(tail);
             }
         }
-        Option::None
+        None
     }
 
     pub fn remove_store<V: AsRef<[T]>>(&self, key: V, store: &U) -> Option<Self> {
         let key_ref = key.as_ref();
-        let mut new_trie = self.clone();
         if key_ref.is_empty() {
-            new_trie.value.retain(|v| {
-                let retain = v.as_ref() != store;
-                retain
-            });
-            if self.value.len() == new_trie.value.len() {
-                return Option::None;
-            } else {
-                return Option::Some(new_trie);
+            let new_value = filter_value(&self.value, store);
+            if new_value.len() == self.value.len() {
+                return None;
             }
+            return Some(Trie {
+                value: new_value,
+                nodes: self.nodes.clone(),
+            });
         }
         let head = &key_ref[0];
         let tail = &key_ref[1..];
-        for (k, v) in new_trie.nodes.iter_mut() {
-            if k == head {
-                let subt = v.remove_store(tail, store)?;
-                *v = Ref::new(subt);
-                return Option::Some(new_trie);
-            }
-        }
-        Option::None
+        remove_from_nodes(&self.nodes, head, tail, store).map(|new_nodes| Trie {
+            value: self.value.clone(),
+            nodes: new_nodes,
+        })
     }
 }
 
@@ -107,6 +100,60 @@ impl<T: PartialEq + Copy> Trie<T> {
     }
     pub fn remove<V: AsRef<[T]>>(&self, value: V) -> Option<Self> {
         self.remove_store(value, &true)
+    }
+}
+
+fn insert_into_nodes<T: PartialEq + Clone, U: PartialEq>(
+    nodes: &Nodes<T, U>,
+    head: &T,
+    tail: &[T],
+    store: U,
+) -> Nodes<T, U> {
+    match nodes.pop_front_rc() {
+        None => List::new().push_front((
+            head.clone(),
+            Ref::new(Trie::new().insert_store(tail, store)),
+        )),
+        Some((entry, rest)) => {
+            let (k, child) = entry.as_ref();
+            if k == head {
+                rest.push_front((k.clone(), Ref::new(child.insert_store(tail, store))))
+            } else {
+                insert_into_nodes(&rest, head, tail, store).push_front((k.clone(), child.clone()))
+            }
+        }
+    }
+}
+
+// Returns a new list with every element equal to `store` removed.
+fn filter_value<U: PartialEq>(values: &List<U>, store: &U) -> List<U> {
+    match values.pop_front_rc() {
+        None => List::new(),
+        Some((v, rest)) => {
+            let rest_filtered = filter_value(&rest, store);
+            if v.as_ref() == store {
+                rest_filtered
+            } else {
+                rest_filtered.push_front_rc(v)
+            }
+        }
+    }
+}
+
+fn remove_from_nodes<T: PartialEq + Clone, U: PartialEq>(
+    nodes: &Nodes<T, U>,
+    head: &T,
+    tail: &[T],
+    store: &U,
+) -> Option<Nodes<T, U>> {
+    let (entry, rest) = nodes.pop_front_rc()?;
+    let (k, child) = entry.as_ref();
+    if k == head {
+        let updated = child.remove_store(tail, store)?;
+        Some(rest.push_front((k.clone(), Ref::new(updated))))
+    } else {
+        let rest_updated = remove_from_nodes(&rest, head, tail, store)?;
+        Some(rest_updated.push_front((k.clone(), child.clone())))
     }
 }
 
