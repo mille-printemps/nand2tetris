@@ -54,6 +54,24 @@ impl<T> Iterator for ListIterator<T> {
     }
 }
 
+pub struct ListBorrowIterator<'a, T> {
+    current: &'a Ref<ListNode<T>>,
+}
+
+impl<'a, T> Iterator for ListBorrowIterator<'a, T> {
+    type Item = &'a T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.current.as_ref() {
+            ListNode::Empty => None,
+            ListNode::Value { value, next_node } => {
+                self.current = next_node;
+                Some(value.as_ref())
+            }
+        }
+    }
+}
+
 pub struct List<T> {
     head: Ref<ListNode<T>>,
     len: usize,
@@ -63,6 +81,12 @@ impl<T> List<T> {
     pub fn iter(&self) -> ListIterator<T> {
         ListIterator {
             current: self.head.clone(),
+        }
+    }
+
+    pub fn iter_ref(&self) -> ListBorrowIterator<'_, T> {
+        ListBorrowIterator {
+            current: &self.head,
         }
     }
 
@@ -109,7 +133,11 @@ impl<T> List<T> {
         }
     }
 
-    fn push_front_rc(&self, rc_value: Ref<T>) -> List<T> {
+    pub fn empty() -> List<T> {
+        Self::new()
+    }
+
+    pub fn push_front_rc(&self, rc_value: Ref<T>) -> List<T> {
         List {
             head: Ref::new(ListNode::Value {
                 value: rc_value,
