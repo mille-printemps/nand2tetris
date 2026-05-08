@@ -1,8 +1,7 @@
 use crate::deque::{BankersDeque, BankersDequeIterator, Deque};
 use crate::Ref;
 use std::cell::RefCell;
-
-type D<T> = BankersDeque<T>;
+use std::fmt;
 
 // lazy infrastructure (Thunk)
 type Thunk<T> = Ref<RefCell<LazyState<T>>>;
@@ -40,14 +39,14 @@ impl<T: Clone + 'static> LazyState<T> {
     }
 }
 
-// catenable deque data structure
+// Catenable deque data structure
 #[derive(Clone)]
 enum CatNode<T: Clone + 'static> {
-    Shallow(D<T>),
+    Shallow(BankersDeque<T>),
     Deep {
-        head: D<T>,
-        middle: Thunk<D<CatenableDeque<T>>>,
-        tail: D<T>,
+        head: BankersDeque<T>,
+        middle: Thunk<BankersDeque<CatenableDeque<T>>>,
+        tail: BankersDeque<T>,
     },
 }
 
@@ -63,15 +62,21 @@ impl<T: Clone + 'static> Default for CatenableDeque<T> {
     }
 }
 
+impl<T: Clone + 'static + fmt::Debug> fmt::Debug for CatenableDeque<T> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.debug_list().entries(self.iter()).finish()
+    }
+}
+
 impl<T: Clone + 'static> CatenableDeque<T> {
     pub fn new() -> Self {
         CatenableDeque {
-            node: Ref::new(CatNode::Shallow(D::empty())),
+            node: Ref::new(CatNode::Shallow(BankersDeque::empty())),
             len: 0,
         }
     }
 
-    fn shallow(d: D<T>) -> Self {
+    fn shallow(d: BankersDeque<T>) -> Self {
         let len = d.len();
         CatenableDeque {
             node: Ref::new(CatNode::Shallow(d)),
@@ -79,7 +84,12 @@ impl<T: Clone + 'static> CatenableDeque<T> {
         }
     }
 
-    fn deep(head: D<T>, middle: Thunk<D<CatenableDeque<T>>>, tail: D<T>, len: usize) -> Self {
+    fn deep(
+        head: BankersDeque<T>,
+        middle: Thunk<BankersDeque<CatenableDeque<T>>>,
+        tail: BankersDeque<T>,
+        len: usize,
+    ) -> Self {
         CatenableDeque {
             node: Ref::new(CatNode::Deep { head, middle, tail }),
             len,
@@ -87,7 +97,7 @@ impl<T: Clone + 'static> CatenableDeque<T> {
     }
 
     // Append d1 (small) to the front of d2
-    fn short_append_left(deque1: &D<T>, deque2: &D<T>) -> D<T> {
+    fn short_append_left(deque1: &BankersDeque<T>, deque2: &BankersDeque<T>) -> BankersDeque<T> {
         if deque1.is_empty() {
             deque2.clone()
         } else {
@@ -97,7 +107,7 @@ impl<T: Clone + 'static> CatenableDeque<T> {
     }
 
     // Append d2 (small) to the back of d1
-    fn short_append_right(deque1: &D<T>, deque2: &D<T>) -> D<T> {
+    fn short_append_right(deque1: &BankersDeque<T>, deque2: &BankersDeque<T>) -> BankersDeque<T> {
         if deque2.is_empty() {
             deque1.clone()
         } else {
@@ -119,7 +129,7 @@ impl<T: Clone + 'static> CatenableDeque<T> {
                 } else {
                     Self::deep(
                         deque1.clone(),
-                        LazyState::new(D::empty),
+                        LazyState::new(BankersDeque::empty),
                         deque2.clone(),
                         len,
                     )
@@ -134,17 +144,17 @@ impl<T: Clone + 'static> CatenableDeque<T> {
                         len,
                     )
                 } else {
-                    let head_clone = head.clone();
-                    let middle_clone = middle.clone();
-                    let deque_clone = deque.clone();
-                    let tail_clone = tail.clone();
+                    let head = head.clone();
+                    let middle = middle.clone();
+                    let deque = deque.clone();
+                    let tail = tail.clone();
 
                     let new_middle = LazyState::new(move || {
-                        let forced_middle = LazyState::force(&middle_clone);
-                        forced_middle.push_front(Self::shallow(head_clone))
+                        let forced_middle = LazyState::force(&middle);
+                        forced_middle.push_front(Self::shallow(head))
                     });
 
-                    Self::deep(deque_clone, new_middle, tail_clone, len)
+                    Self::deep(deque, new_middle, tail, len)
                 }
             }
             (Deep { head, middle, tail }, Shallow(deque)) => {
@@ -156,17 +166,17 @@ impl<T: Clone + 'static> CatenableDeque<T> {
                         len,
                     )
                 } else {
-                    let head_clone = head.clone();
-                    let middle_clone = middle.clone();
-                    let tail_clone = tail.clone();
-                    let deque_clone = deque.clone();
+                    let head = head.clone();
+                    let middle = middle.clone();
+                    let tail = tail.clone();
+                    let deque = deque.clone();
 
                     let new_middle = LazyState::new(move || {
-                        let forced_middle = LazyState::force(&middle_clone);
-                        forced_middle.push_back(Self::shallow(tail_clone))
+                        let forced_middle = LazyState::force(&middle);
+                        forced_middle.push_back(Self::shallow(tail))
                     });
 
-                    Self::deep(head_clone, new_middle, deque_clone, len)
+                    Self::deep(head, new_middle, deque, len)
                 }
             }
             (
@@ -181,25 +191,25 @@ impl<T: Clone + 'static> CatenableDeque<T> {
                     tail: tail2,
                 },
             ) => {
-                let head1_clone = head1.clone();
-                let middle1_clone = middle1.clone();
-                let tail1_clone = tail1.clone();
+                let head1 = head1.clone();
+                let middle1 = middle1.clone();
+                let tail1 = tail1.clone();
 
-                let head2_clone = head2.clone();
-                let middle2_clone = middle2.clone();
-                let tail2_clone = tail2.clone();
+                let middle2 = middle2.clone();
+                let head2 = head2.clone();
+                let tail2 = tail2.clone();
 
                 let new_middle = LazyState::new(move || {
-                    let forced_middle1 = LazyState::force(&middle1_clone);
-                    let forced_middle2 = LazyState::force(&middle2_clone);
+                    let forced_middle1 = LazyState::force(&middle1);
+                    let forced_middle2 = LazyState::force(&middle2);
 
-                    let left = forced_middle1.push_back(Self::shallow(tail1_clone));
-                    let right = forced_middle2.push_front(Self::shallow(head2_clone));
+                    let left = forced_middle1.push_back(Self::shallow(tail1));
+                    let right = forced_middle2.push_front(Self::shallow(head2));
 
                     left.append(&right)
                 });
 
-                Self::deep(head1_clone, new_middle, tail2_clone, len)
+                Self::deep(head1, new_middle, tail2, len)
             }
         }
     }
@@ -341,7 +351,9 @@ impl<T: Clone + 'static> Deque<T> for CatenableDeque<T> {
                         let (middle_front, middle_rest) = forced_middle.pop_front()?;
                         let new_head = match middle_front.node.as_ref() {
                             CatNode::Shallow(deque) => deque.clone(),
-                            _ => panic!("Invariant Violated: M contents should be Shallow"),
+                            // Middle elements are always inserted via `Self::shallow(...)`
+                            // in the `append` paths, so they can never be `Deep`.
+                            CatNode::Deep { .. } => unreachable!(),
                         };
                         let new_middle = LazyState::new(move || middle_rest);
                         Some((
@@ -381,7 +393,9 @@ impl<T: Clone + 'static> Deque<T> for CatenableDeque<T> {
                         let (middle_front, middle_rest) = forced_middle.pop_back()?;
                         let new_tail = match middle_front.node.as_ref() {
                             CatNode::Shallow(deque) => deque.clone(),
-                            _ => panic!("Invariant Violated"),
+                            // Middle elements are always inserted via `Self::shallow(...)`
+                            // in the `append` paths, so they can never be `Deep`.
+                            CatNode::Deep { .. } => unreachable!(),
                         };
                         let new_middle = LazyState::new(move || middle_rest);
                         Some((
