@@ -86,7 +86,7 @@ impl<T: Clone + 'static> CatenableDeque<T> {
         }
     }
 
-    // append d1 (small) to the front of d2
+    // Append d1 (small) to the front of d2
     fn short_append_left(deque1: &D<T>, deque2: &D<T>) -> D<T> {
         if deque1.is_empty() {
             deque2.clone()
@@ -96,7 +96,7 @@ impl<T: Clone + 'static> CatenableDeque<T> {
         }
     }
 
-    // append d2 (small) to the back of d1
+    // Append d2 (small) to the back of d1
     fn short_append_right(deque1: &D<T>, deque2: &D<T>) -> D<T> {
         if deque2.is_empty() {
             deque1.clone()
@@ -106,7 +106,7 @@ impl<T: Clone + 'static> CatenableDeque<T> {
         }
     }
 
-    // core catenation logic
+    // Core catenation logic
     pub fn append(&self, other: &Self) -> Self {
         use CatNode::*;
         let len = self.len + other.len;
@@ -196,18 +196,7 @@ impl<T: Clone + 'static> CatenableDeque<T> {
                     let left = forced_middle1.push_back(Self::shallow(tail1_clone));
                     let right = forced_middle2.push_front(Self::shallow(head2_clone));
 
-                    // manual append for BankersDeque
-                    let mut result = left;
-                    let mut deque = right;
-                    let mut elements = Vec::new();
-                    while let Some((val, next)) = deque.pop_front() {
-                        elements.push(val);
-                        deque = next;
-                    }
-                    for val in elements {
-                        result = result.push_back((*val).clone());
-                    }
-                    result
+                    left.append(&right)
                 });
 
                 Self::deep(head1_clone, new_middle, tail2_clone, len)

@@ -109,6 +109,17 @@ impl<T> List<T> {
         (first.reverse(), second.reverse())
     }
 
+    // Concatenates `self` and `other`, reusing every existing `Ref<T>` cell.
+    pub fn append(&self, other: &List<T>) -> List<T> {
+        let mut result = other.clone();
+        let mut prefix = self.reverse();
+        while let Some((value, rest)) = prefix.pop_front_rc() {
+            result = result.push_front_rc(value);
+            prefix = rest;
+        }
+        result
+    }
+
     pub fn reverse(&self) -> List<T> {
         let mut node = self.head.clone();
         let mut last_node = Ref::new(ListNode::Empty);
@@ -249,6 +260,29 @@ mod tests {
         assert_eq!(*popped_element, 987);
         assert_eq!(remaining_list.len(), 1);
         assert_eq!(remaining_list.front(), Some(&123));
+    }
+
+    #[test]
+    fn test_append() {
+        let a = List::new().push_front(2).push_front(1);
+        let b = List::new().push_front(4).push_front(3);
+        let c = a.append(&b);
+        assert_eq!(c.len(), 4);
+        let collected: Vec<i32> = c.iter_ref().copied().collect();
+        assert_eq!(collected, vec![1, 2, 3, 4]);
+        // originals unchanged
+        assert_eq!(a.len(), 2);
+        assert_eq!(b.len(), 2);
+    }
+
+    #[test]
+    fn test_append_with_empty() {
+        let a = List::new().push_front(2).push_front(1);
+        let empty: List<i32> = List::new();
+        let left = empty.append(&a);
+        let right = a.append(&empty);
+        assert_eq!(left.len(), 2);
+        assert_eq!(right.len(), 2);
     }
 
     #[test]
