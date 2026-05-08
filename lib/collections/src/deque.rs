@@ -1,3 +1,5 @@
+use std::fmt;
+
 use crate::Ref;
 
 use super::list;
@@ -25,6 +27,12 @@ pub struct BankersDeque<T> {
 impl<T> Default for BankersDeque<T> {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl<T: Clone + fmt::Debug> fmt::Debug for BankersDeque<T> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.debug_list().entries(self.iter()).finish()
     }
 }
 
