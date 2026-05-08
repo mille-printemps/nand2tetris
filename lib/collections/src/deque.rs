@@ -1,3 +1,5 @@
+use std::fmt;
+
 use crate::Ref;
 
 use super::list;
@@ -25,6 +27,12 @@ pub struct BankersDeque<T> {
 impl<T> Default for BankersDeque<T> {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl<T: Clone + fmt::Debug> fmt::Debug for BankersDeque<T> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.debug_list().entries(self.iter()).finish()
     }
 }
 
@@ -158,6 +166,16 @@ impl<T: Clone> Deque<T> for BankersDeque<T> {
 }
 
 impl<T> BankersDeque<T> {
+    // Concatenates `self` and `other`. Logically `[self elems..., other elems...]`.
+    pub fn append(&self, other: &Self) -> Self {
+        let new_head = self.head.append(&self.tail.reverse()).append(&other.head);
+        Self {
+            head: new_head,
+            tail: other.tail.clone(),
+        }
+        .balance()
+    }
+
     fn balance(&self) -> Self {
         if self.head.is_empty() {
             let (tail, rev_head) = self.tail.split();
@@ -208,6 +226,25 @@ mod tests {
         assert_eq!(deque.len(), 0);
         assert!(deque.pop_front().is_none());
         assert!(deque.pop_back().is_none());
+    }
+
+    #[test]
+    fn test_append() {
+        let a: BankersDeque<i32> = BankersDeque::new().push_back(1).push_back(2).push_back(3);
+        let b: BankersDeque<i32> = BankersDeque::new().push_back(4).push_back(5).push_back(6);
+        let c = a.append(&b);
+        assert_eq!(c.len(), 6);
+        let collected: Vec<i32> = c.iter().map(|r| *r).collect();
+        assert_eq!(collected, vec![1, 2, 3, 4, 5, 6]);
+        // originals unchanged
+        assert_eq!(a.len(), 3);
+        assert_eq!(b.len(), 3);
+
+        // empty cases
+        let empty: BankersDeque<i32> = BankersDeque::new();
+        assert_eq!(empty.append(&a).len(), 3);
+        assert_eq!(a.append(&empty).len(), 3);
+        assert_eq!(empty.append(&empty).len(), 0);
     }
 
     #[test]
