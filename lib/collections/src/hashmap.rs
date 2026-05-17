@@ -30,10 +30,6 @@ impl<K: Hash + PartialEq, V> HashMap<K, V> {
         HashMap { trie: Trie::new() }
     }
 
-    pub fn empty() -> HashMap<K, V> {
-        Self::new()
-    }
-
     pub fn insert(&self, key: K, value: V) -> Self {
         Self {
             trie: self.trie.insert_store(

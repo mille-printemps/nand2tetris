@@ -144,10 +144,6 @@ impl<T> List<T> {
         }
     }
 
-    pub fn empty() -> List<T> {
-        Self::new()
-    }
-
     pub fn push_front_rc(&self, rc_value: Ref<T>) -> List<T> {
         List {
             head: Ref::new(ListNode::Value {

@@ -25,10 +25,6 @@ impl<T: PartialEq + Clone, U: PartialEq> Trie<T, U> {
         }
     }
 
-    pub fn empty() -> Trie<T, U> {
-        Self::new()
-    }
-
     pub fn insert_store<K: AsRef<[T]>>(&self, key: K, store: U) -> Self {
         let key_ref = key.as_ref();
         if key_ref.is_empty() {
