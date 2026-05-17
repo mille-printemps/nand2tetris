@@ -1,4 +1,5 @@
 use crate::deque::{BankersDeque, BankersDequeIterator, Deque};
+use crate::empty::Empty;
 use crate::Ref;
 use std::cell::RefCell;
 use std::fmt;
@@ -274,10 +275,6 @@ impl<T: Clone + 'static> Iterator for CatenableDequeIterator<T> {
 
 impl<T: Clone + 'static> Deque<T> for CatenableDeque<T> {
     type Iter = CatenableDequeIterator<T>;
-
-    fn empty() -> Self {
-        Self::new()
-    }
 
     fn is_empty(&self) -> bool {
         self.len == 0

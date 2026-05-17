@@ -1,13 +1,13 @@
 use std::fmt;
 
+use crate::empty::Empty;
 use crate::Ref;
 
 use super::list;
 
-pub trait Deque<T>: Sized + Clone {
+pub trait Deque<T>: Sized + Clone + Empty {
     type Iter: Iterator<Item = Ref<T>>;
 
-    fn empty() -> Self;
     fn push_front(&self, value: T) -> Self;
     fn push_back(&self, value: T) -> Self;
     fn pop_front(&self) -> Option<(Ref<T>, Self)>;
@@ -56,10 +56,6 @@ impl<T> BankersDeque<T> {
 
 impl<T: Clone> Deque<T> for BankersDeque<T> {
     type Iter = BankersDequeIterator<T>;
-
-    fn empty() -> Self {
-        Self::new()
-    }
 
     fn push_front(&self, value: T) -> Self {
         Self {
