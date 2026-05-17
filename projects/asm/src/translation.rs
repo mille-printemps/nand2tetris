@@ -1,7 +1,7 @@
-use collections::hashmap::*;
+use collections::{Empty, hashmap::HashMap};
 
 pub fn symbol_table() -> HashMap<String, u32> {
-    HashMap::new()
+    HashMap::empty()
         .insert("R0".to_string(), 0)
         .insert("R1".to_string(), 1)
         .insert("R2".to_string(), 2)
@@ -28,7 +28,7 @@ pub fn symbol_table() -> HashMap<String, u32> {
 }
 
 pub fn comp_table() -> HashMap<&'static str, &'static str> {
-    HashMap::new()
+    HashMap::empty()
         .insert("0", "0101010")
         .insert("1", "0111111")
         .insert("-1", "0111010")
@@ -59,7 +59,7 @@ pub fn comp_table() -> HashMap<&'static str, &'static str> {
 }
 
 pub fn dest_table() -> HashMap<&'static str, &'static str> {
-    HashMap::new()
+    HashMap::empty()
         .insert("M", "001")
         .insert("D", "010")
         .insert("MD", "011")
@@ -71,7 +71,7 @@ pub fn dest_table() -> HashMap<&'static str, &'static str> {
 }
 
 pub fn jump_table() -> HashMap<&'static str, &'static str> {
-    HashMap::new()
+    HashMap::empty()
         .insert("JGT", "001")
         .insert("JEQ", "010")
         .insert("JGE", "011")
