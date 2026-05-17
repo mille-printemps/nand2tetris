@@ -1,5 +1,6 @@
 use collections::deque::*;
 use collections::hashmap::*;
+use collections::Empty;
 use functional::functor::*;
 use functional::io::*;
 use instruction::*;

@@ -1,4 +1,5 @@
 use collections::deque::{BankersDeque, Deque};
+use collections::Empty;
 use functional::functor::Functor;
 use functional::io::IO;
 use std::env;

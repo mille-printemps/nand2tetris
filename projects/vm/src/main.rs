@@ -1,5 +1,6 @@
 use collections::catdeque::CatenableDeque;
 use collections::deque::*;
+use collections::Empty;
 use command::*;
 use functional::functor::*;
 use functional::io::*;

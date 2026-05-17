@@ -152,6 +152,7 @@ pub fn tokens_to_xml<D: Deque<Token>>(tokens: &D) -> String {
 mod tests {
     use super::*;
     use collections::deque::{BankersDeque, Deque};
+    use collections::Empty;
 
     fn to_vec<D: Deque<Token>>(d: D) -> Vec<Token> {
         d.iter().map(|t| t.as_ref().clone()).collect()
