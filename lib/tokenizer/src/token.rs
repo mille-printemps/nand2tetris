@@ -37,7 +37,7 @@ pub enum Token {
     Identifier(String),
 }
 
-/// Skips any leading combination of whitespace, `//` line comments, and `/* */` block comments.
+// Skips any leading combination of whitespace, `//` line comments, and `/* */` block comments.
 pub fn skip(input: &str) -> &str {
     match zero_or_more(either(
         either(line_comment(), block_comment()),
@@ -50,9 +50,7 @@ pub fn skip(input: &str) -> &str {
     }
 }
 
-/// Parses a Jack identifier: `[a-zA-Z_][a-zA-Z0-9_]*`.
-/// The lib's `identifier` is more permissive (allows `-`, `.`, `$`, `:`),
-/// so we build a stricter one from primitives.
+// Parses a Jack identifier: `[a-zA-Z_][a-zA-Z0-9_]*`.
 fn jack_identifier(input: &str) -> ParseResult<String> {
     pair(
         pred(any_char, |c| c.is_alphabetic() || *c == '_'),
@@ -75,9 +73,6 @@ fn keyword_or_identifier(input: &str) -> ParseResult<Token> {
 }
 
 // TODO should the tokenizer enforce the 32767 limit on integer constants?
-// The spec says "integer constants in Jack are decimal numbers in the range 0..32767",
-// but it's not clear if that's a semantic constraint or just a hint for VM code generation.
-// For now any u16 is allowed, which is a superset of the spec's allowed integers.
 fn integer_constant(input: &str) -> ParseResult<Token> {
     let (remaining, s) = one_or_more(pred(any_char, |c| c.is_ascii_digit()))
         .map(|chars| chars.into_iter().collect::<String>())

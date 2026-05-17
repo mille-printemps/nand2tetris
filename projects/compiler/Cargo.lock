@@ -3,7 +3,11 @@
 version = 3
 
 [[package]]
-name = "analyzer"
+name = "collections"
+version = "0.1.0"
+
+[[package]]
+name = "compiler"
 version = "0.1.0"
 dependencies = [
  "collections",
@@ -11,10 +15,6 @@ dependencies = [
  "parser",
  "tokenizer",
 ]
-
-[[package]]
-name = "collections"
-version = "0.1.0"
 
 [[package]]
 name = "functional"
