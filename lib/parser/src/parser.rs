@@ -149,6 +149,8 @@ pub fn number(input: &str) -> ParseResult<String> {
 }
 
 pub fn identifier(input: &str) -> ParseResult<String> {
+    const SYMBOLS: &str = "-_.$:";
+
     let mut matched = String::new();
     let mut chars = input.chars();
 
@@ -158,13 +160,7 @@ pub fn identifier(input: &str) -> ParseResult<String> {
     }
 
     for next in chars {
-        if next.is_alphanumeric()
-            || next == '-'
-            || next == '_'
-            || next == '.'
-            || next == '$'
-            || next == ':'
-        {
+        if next.is_alphanumeric() || SYMBOLS.contains(next) {
             matched.push(next);
         } else {
             break;
