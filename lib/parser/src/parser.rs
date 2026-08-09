@@ -129,7 +129,7 @@ pub fn number(input: &str) -> ParseResult<String> {
 
     match chars.next() {
         Some(next) if next.is_ascii_digit() => matched.push(next),
-        Some(next) if next == '.' => return Err(input),
+        Some('.') => return Err(input),
         _ => return Err(input),
     }
 
