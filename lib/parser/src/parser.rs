@@ -501,7 +501,10 @@ mod tests {
     #[test]
     fn block_comment_parser() {
         assert_eq!(Ok(("rest", ())), block_comment().parse("/* comment */rest"));
-        assert_eq!(Ok(("rest", ())), block_comment().parse("/* multi\nline\n*/rest"));
+        assert_eq!(
+            Ok(("rest", ())),
+            block_comment().parse("/* multi\nline\n*/rest")
+        );
         assert!(block_comment().parse("not a comment").is_err());
     }
 
