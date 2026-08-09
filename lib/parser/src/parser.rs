@@ -258,8 +258,8 @@ pub fn any_char(input: &str) -> ParseResult<char> {
     }
 }
 
-/// Consumes input up to and including `sentinel`, returning the text before it.
-/// Fails if `sentinel` is not found.
+// Consumes input up to and including sentinel, returning the text before it.
+// Fails if sentinel is not found.
 pub fn take_until<'a>(sentinel: &'static str) -> impl Parser<'a, &'a str> {
     move |input: &'a str| match input.find(sentinel) {
         Some(i) => Ok((&input[i + sentinel.len()..], &input[..i])),
@@ -267,12 +267,12 @@ pub fn take_until<'a>(sentinel: &'static str) -> impl Parser<'a, &'a str> {
     }
 }
 
-/// Parses a `/* ... */` block comment, discarding its content.
+// Parses a /* ... */ block comment, discarding its content.
 pub fn block_comment<'a>() -> impl Parser<'a, ()> {
     right(match_literal("/*"), take_until("*/")).map(|_| ())
 }
 
-/// Parses a `// ...` line comment up to (and including) the newline, or to EOF.
+// Parses a // ... line comment up to (and including) the newline, or to EOF.
 pub fn line_comment<'a>() -> impl Parser<'a, ()> {
     right(
         match_literal("//"),
