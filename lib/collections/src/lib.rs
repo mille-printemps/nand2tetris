@@ -9,6 +9,8 @@ pub mod catdeque;
 pub mod deque;
 pub mod empty;
 pub mod hashmap;
+#[cfg(not(feature = "threadsafe"))]
+pub mod lazy;
 pub mod list;
 pub mod trie;
 

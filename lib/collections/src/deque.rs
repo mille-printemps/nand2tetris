@@ -161,8 +161,18 @@ impl<T: Clone> Deque<T> for BankersDeque<T> {
     }
 }
 
+impl<T: Clone> BankersDeque<T> {
+    // Concatenates self and other by pushing other's elements onto
+    // the back one at a time, costing O(|other|).
+    pub fn push_back_all(&self, other: &Self) -> Self {
+        other.iter().fold(self.clone(), |deque, value| {
+            deque.push_back((*value).clone())
+        })
+    }
+}
+
 impl<T> BankersDeque<T> {
-    // Concatenates `self` and `other`. Logically `[self elems..., other elems...]`.
+    // Concatenates self and other. Logically [self elems..., other elems...].
     pub fn append(&self, other: &Self) -> Self {
         let new_head = self.head.append(&self.tail.reverse()).append(&other.head);
         Self {
