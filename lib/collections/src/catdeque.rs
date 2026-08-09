@@ -1,279 +1,267 @@
+// A catenable deque: a persistent deque that also supports append.
+
 use crate::deque::{BankersDeque, BankersDequeIterator, Deque};
-use crate::empty::Empty;
+use crate::lazy::Lazy;
 use crate::Ref;
-use std::cell::RefCell;
 use std::fmt;
 
-// lazy infrastructure (Thunk)
-type Thunk<T> = Ref<RefCell<LazyState<T>>>;
+// A run of consecutive elements. Okasaki's `D.Queue`.
+type Chunk<T> = BankersDeque<Elem<T>>;
 
-enum LazyState<T> {
-    Unevaluated(Box<dyn FnOnce() -> T>),
-    Evaluated(T),
-    Processing,
+// One slot of a chunk.
+enum Elem<T> {
+    Value(Ref<T>),
+    Chunk(Chunk<T>),
 }
 
-impl<T: Clone + 'static> LazyState<T> {
-    fn new<F>(f: F) -> Thunk<T>
-    where
-        F: FnOnce() -> T + 'static,
-    {
-        Ref::new(RefCell::new(LazyState::Unevaluated(Box::new(f))))
-    }
-
-    fn force(thunk: &Thunk<T>) -> T {
-        let mut borrow = thunk.borrow_mut();
-        match &*borrow {
-            LazyState::Evaluated(val) => val.clone(),
-            LazyState::Unevaluated(_) => {
-                match std::mem::replace(&mut *borrow, LazyState::Processing) {
-                    LazyState::Unevaluated(f) => {
-                        let val = f();
-                        *borrow = LazyState::Evaluated(val.clone());
-                        val
-                    }
-                    _ => unreachable!(),
-                }
-            }
-            LazyState::Processing => panic!("Recursive forcing of thunk detected"),
+impl<T> Clone for Elem<T> {
+    fn clone(&self) -> Self {
+        match self {
+            Elem::Value(value) => Elem::Value(value.clone()),
+            Elem::Chunk(chunk) => Elem::Chunk(chunk.clone()),
         }
     }
 }
 
-// Catenable deque data structure
-#[derive(Clone)]
-enum CatNode<T: Clone + 'static> {
-    Shallow(BankersDeque<T>),
+enum CatNode<T> {
+    Shallow(Chunk<T>),
+    // Invariant: head and tail are both non-empty.
     Deep {
-        head: BankersDeque<T>,
-        middle: Thunk<BankersDeque<CatenableDeque<T>>>,
-        tail: BankersDeque<T>,
+        head: Chunk<T>,
+        middle: Lazy<Spine<T>>,
+        tail: Chunk<T>,
     },
 }
 
-#[derive(Clone)]
-pub struct CatenableDeque<T: Clone + 'static> {
+// A catenable deque of Elem: the recursive structure itself.
+struct Spine<T> {
     node: Ref<CatNode<T>>,
-    len: usize,
 }
 
-impl<T: Clone + 'static> Default for CatenableDeque<T> {
-    fn default() -> Self {
-        Self::new()
+impl<T> Clone for Spine<T> {
+    fn clone(&self) -> Self {
+        Spine {
+            node: self.node.clone(),
+        }
     }
 }
 
-impl<T: Clone + 'static + fmt::Debug> fmt::Debug for CatenableDeque<T> {
+impl<T: 'static> Spine<T> {
+    fn shallow(chunk: Chunk<T>) -> Self {
+        Spine {
+            node: Ref::new(CatNode::Shallow(chunk)),
+        }
+    }
+
+    fn deep(head: Chunk<T>, middle: Lazy<Spine<T>>, tail: Chunk<T>) -> Self {
+        debug_assert!(!head.is_empty(), "Deep head must be non-empty");
+        debug_assert!(!tail.is_empty(), "Deep tail must be non-empty");
+        Spine {
+            node: Ref::new(CatNode::Deep { head, middle, tail }),
+        }
+    }
+
+    fn empty() -> Self {
+        Self::shallow(BankersDeque::new())
+    }
+
+    fn cons(&self, elem: Elem<T>) -> Self {
+        match self.node.as_ref() {
+            CatNode::Shallow(chunk) => Self::shallow(chunk.push_front(elem)),
+            CatNode::Deep { head, middle, tail } => {
+                Self::deep(head.push_front(elem), middle.clone(), tail.clone())
+            }
+        }
+    }
+
+    fn snoc(&self, elem: Elem<T>) -> Self {
+        match self.node.as_ref() {
+            CatNode::Shallow(chunk) => Self::shallow(chunk.push_back(elem)),
+            CatNode::Deep { head, middle, tail } => {
+                Self::deep(head.clone(), middle.clone(), tail.push_back(elem))
+            }
+        }
+    }
+
+    fn head(&self) -> Option<Elem<T>> {
+        let chunk = match self.node.as_ref() {
+            CatNode::Shallow(chunk) => chunk,
+            CatNode::Deep { head, .. } => head,
+        };
+        chunk.front().map(|elem| (*elem).clone())
+    }
+
+    fn last(&self) -> Option<Elem<T>> {
+        let chunk = match self.node.as_ref() {
+            CatNode::Shallow(chunk) => chunk,
+            CatNode::Deep { tail, .. } => tail,
+        };
+        chunk.back().map(|elem| (*elem).clone())
+    }
+
+    fn append(&self, other: &Self) -> Self {
+        match (self.node.as_ref(), other.node.as_ref()) {
+            (CatNode::Shallow(left), CatNode::Shallow(right)) => {
+                if left.len() < 2 {
+                    Self::shallow(left.append(right))
+                } else if right.len() < 2 {
+                    Self::shallow(left.push_back_all(right))
+                } else {
+                    Self::deep(left.clone(), Lazy::from_value(Self::empty()), right.clone())
+                }
+            }
+
+            (CatNode::Shallow(chunk), CatNode::Deep { head, middle, tail }) => {
+                if chunk.len() < 2 {
+                    Self::deep(chunk.append(head), middle.clone(), tail.clone())
+                } else {
+                    let (spine, displaced) = (middle.clone(), head.clone());
+                    Self::deep(
+                        chunk.clone(),
+                        Lazy::new(move || spine.force().cons(Elem::Chunk(displaced))),
+                        tail.clone(),
+                    )
+                }
+            }
+
+            (CatNode::Deep { head, middle, tail }, CatNode::Shallow(chunk)) => {
+                if chunk.len() < 2 {
+                    Self::deep(head.clone(), middle.clone(), tail.push_back_all(chunk))
+                } else {
+                    let (spine, displaced) = (middle.clone(), tail.clone());
+                    Self::deep(
+                        head.clone(),
+                        Lazy::new(move || spine.force().snoc(Elem::Chunk(displaced))),
+                        chunk.clone(),
+                    )
+                }
+            }
+
+            (
+                CatNode::Deep {
+                    head: left_head,
+                    middle: left_middle,
+                    tail: left_tail,
+                },
+                CatNode::Deep {
+                    head: right_head,
+                    middle: right_middle,
+                    tail: right_tail,
+                },
+            ) => {
+                let (left_spine, right_spine) = (left_middle.clone(), right_middle.clone());
+                let (displaced_left, displaced_right) = (left_tail.clone(), right_head.clone());
+                // The recursive step: the two spines are catenated by *this* function one level down,
+                // not merged element by element.
+                let middle = Lazy::new(move || {
+                    let left = left_spine.force().snoc(Elem::Chunk(displaced_left));
+                    let right = right_spine.force().cons(Elem::Chunk(displaced_right));
+                    left.append(&right)
+                });
+                Self::deep(left_head.clone(), middle, right_tail.clone())
+            }
+        }
+    }
+
+    fn tail(&self) -> Option<Self> {
+        match self.node.as_ref() {
+            CatNode::Shallow(chunk) => Some(Self::shallow(chunk.pop_front()?.1)),
+            CatNode::Deep { head, middle, tail } => {
+                let (_, rest) = head.pop_front()?;
+                if !rest.is_empty() {
+                    return Some(Self::deep(rest, middle.clone(), tail.clone()));
+                }
+                // head is used up. refill it from the front of the spine.
+                let spine = middle.force();
+                match spine.head() {
+                    None => Some(Self::shallow(tail.clone())),
+                    Some(Elem::Chunk(chunk)) => Some(Self::deep(
+                        chunk,
+                        Lazy::from_value(spine.tail().expect("a non-empty spine has a tail")),
+                        tail.clone(),
+                    )),
+                    Some(Elem::Value(_)) => unreachable!("a spine holds only chunks"),
+                }
+            }
+        }
+    }
+
+    fn init(&self) -> Option<Self> {
+        match self.node.as_ref() {
+            CatNode::Shallow(chunk) => Some(Self::shallow(chunk.pop_back()?.1)),
+            CatNode::Deep { head, middle, tail } => {
+                let (_, rest) = tail.pop_back()?;
+                if !rest.is_empty() {
+                    return Some(Self::deep(head.clone(), middle.clone(), rest));
+                }
+                let spine = middle.force();
+                match spine.last() {
+                    None => Some(Self::shallow(head.clone())),
+                    Some(Elem::Chunk(chunk)) => Some(Self::deep(
+                        head.clone(),
+                        Lazy::from_value(spine.init().expect("a non-empty spine has an init")),
+                        chunk,
+                    )),
+                    Some(Elem::Value(_)) => unreachable!("a spine holds only chunks"),
+                }
+            }
+        }
+    }
+}
+
+// public wrapper
+
+pub struct CatenableDeque<T> {
+    spine: Spine<T>,
+    len: usize,
+}
+
+impl<T> Clone for CatenableDeque<T> {
+    fn clone(&self) -> Self {
+        CatenableDeque {
+            spine: self.spine.clone(),
+            len: self.len,
+        }
+    }
+}
+
+impl<T: 'static> Default for CatenableDeque<T> {
+    fn default() -> Self {
+        CatenableDeque {
+            spine: Spine::empty(),
+            len: 0,
+        }
+    }
+}
+
+impl<T: 'static + fmt::Debug> fmt::Debug for CatenableDeque<T> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.debug_list().entries(self.iter()).finish()
     }
 }
 
-impl<T: Clone + 'static> CatenableDeque<T> {
+impl<T: 'static> CatenableDeque<T> {
     pub fn new() -> Self {
-        CatenableDeque {
-            node: Ref::new(CatNode::Shallow(BankersDeque::empty())),
-            len: 0,
+        Self::default()
+    }
+
+    fn wrap(spine: Spine<T>, len: usize) -> Self {
+        CatenableDeque { spine, len }
+    }
+
+    fn unwrap_value(elem: Elem<T>) -> Ref<T> {
+        match elem {
+            Elem::Value(value) => value,
+            Elem::Chunk(_) => unreachable!("the outermost level holds only values"),
         }
     }
 
-    fn shallow(d: BankersDeque<T>) -> Self {
-        let len = d.len();
-        CatenableDeque {
-            node: Ref::new(CatNode::Shallow(d)),
-            len,
-        }
-    }
-
-    fn deep(
-        head: BankersDeque<T>,
-        middle: Thunk<BankersDeque<CatenableDeque<T>>>,
-        tail: BankersDeque<T>,
-        len: usize,
-    ) -> Self {
-        CatenableDeque {
-            node: Ref::new(CatNode::Deep { head, middle, tail }),
-            len,
-        }
-    }
-
-    // Append d1 (small) to the front of d2
-    fn short_append_left(deque1: &BankersDeque<T>, deque2: &BankersDeque<T>) -> BankersDeque<T> {
-        if deque1.is_empty() {
-            deque2.clone()
-        } else {
-            let val_rc = deque1.front().unwrap();
-            deque2.push_front((*val_rc).clone())
-        }
-    }
-
-    // Append d2 (small) to the back of d1
-    fn short_append_right(deque1: &BankersDeque<T>, deque2: &BankersDeque<T>) -> BankersDeque<T> {
-        if deque2.is_empty() {
-            deque1.clone()
-        } else {
-            let val_rc = deque2.front().unwrap();
-            deque1.push_back((*val_rc).clone())
-        }
-    }
-
-    // Core catenation logic
     pub fn append(&self, other: &Self) -> Self {
-        use CatNode::*;
-        let len = self.len + other.len;
-        match (self.node.as_ref(), other.node.as_ref()) {
-            (Shallow(deque1), Shallow(deque2)) => {
-                if deque1.len() < 2 {
-                    Self::shallow(Self::short_append_left(deque1, deque2))
-                } else if deque2.len() < 2 {
-                    Self::shallow(Self::short_append_right(deque1, deque2))
-                } else {
-                    Self::deep(
-                        deque1.clone(),
-                        LazyState::new(BankersDeque::empty),
-                        deque2.clone(),
-                        len,
-                    )
-                }
-            }
-            (Shallow(deque), Deep { head, middle, tail }) => {
-                if deque.len() < 2 {
-                    Self::deep(
-                        Self::short_append_left(deque, head),
-                        middle.clone(),
-                        tail.clone(),
-                        len,
-                    )
-                } else {
-                    let head = head.clone();
-                    let middle = middle.clone();
-                    let deque = deque.clone();
-                    let tail = tail.clone();
-
-                    let new_middle = LazyState::new(move || {
-                        let forced_middle = LazyState::force(&middle);
-                        forced_middle.push_front(Self::shallow(head))
-                    });
-
-                    Self::deep(deque, new_middle, tail, len)
-                }
-            }
-            (Deep { head, middle, tail }, Shallow(deque)) => {
-                if deque.len() < 2 {
-                    Self::deep(
-                        head.clone(),
-                        middle.clone(),
-                        Self::short_append_right(tail, deque),
-                        len,
-                    )
-                } else {
-                    let head = head.clone();
-                    let middle = middle.clone();
-                    let tail = tail.clone();
-                    let deque = deque.clone();
-
-                    let new_middle = LazyState::new(move || {
-                        let forced_middle = LazyState::force(&middle);
-                        forced_middle.push_back(Self::shallow(tail))
-                    });
-
-                    Self::deep(head, new_middle, deque, len)
-                }
-            }
-            (
-                Deep {
-                    head: head1,
-                    middle: middle1,
-                    tail: tail1,
-                },
-                Deep {
-                    head: head2,
-                    middle: middle2,
-                    tail: tail2,
-                },
-            ) => {
-                let head1 = head1.clone();
-                let middle1 = middle1.clone();
-                let tail1 = tail1.clone();
-
-                let middle2 = middle2.clone();
-                let head2 = head2.clone();
-                let tail2 = tail2.clone();
-
-                let new_middle = LazyState::new(move || {
-                    let forced_middle1 = LazyState::force(&middle1);
-                    let forced_middle2 = LazyState::force(&middle2);
-
-                    let left = forced_middle1.push_back(Self::shallow(tail1));
-                    let right = forced_middle2.push_front(Self::shallow(head2));
-
-                    left.append(&right)
-                });
-
-                Self::deep(head1, new_middle, tail2, len)
-            }
-        }
+        Self::wrap(self.spine.append(&other.spine), self.len + other.len)
     }
 }
 
-enum IterFrame<T: Clone + 'static> {
-    // iterate raw elements (from a Shallow node, or head/tail of Deep)
-    Data(BankersDequeIterator<T>),
-    // iterate the middle queue.
-    Node(BankersDequeIterator<CatenableDeque<T>>),
-}
-
-pub struct CatenableDequeIterator<T: Clone + 'static> {
-    stack: Vec<IterFrame<T>>,
-}
-
-impl<T: Clone + 'static> Iterator for CatenableDequeIterator<T> {
-    type Item = Ref<T>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            // peek at the current active iterator on the stack
-            match self.stack.last_mut() {
-                None => return None,
-
-                Some(IterFrame::Data(iter)) => {
-                    if let Some(val) = iter.next() {
-                        return Some(val);
-                    }
-                }
-
-                Some(IterFrame::Node(iter)) => {
-                    if let Some(catdeque) = iter.next() {
-                        use CatNode::*;
-
-                        match catdeque.node.as_ref() {
-                            Shallow(deque) => {
-                                self.stack.push(IterFrame::Data(deque.iter()));
-                            }
-                            Deep { head, middle, tail } => {
-                                // Since it's a stack (LIFO), we push tail, then middle, then head.
-
-                                // 3. tail (Data)
-                                self.stack.push(IterFrame::Data(tail.iter()));
-
-                                // 2. middle (Recursive Nodes)
-                                let forced_middle = LazyState::force(middle);
-                                self.stack.push(IterFrame::Node(forced_middle.iter()));
-
-                                // 1. head (Data)
-                                self.stack.push(IterFrame::Data(head.iter()));
-                            }
-                        }
-                        continue;
-                    }
-                }
-            }
-            self.stack.pop();
-        }
-    }
-}
-
-impl<T: Clone + 'static> Deque<T> for CatenableDeque<T> {
+impl<T: 'static> Deque<T> for CatenableDeque<T> {
     type Iter = CatenableDequeIterator<T>;
 
     fn is_empty(&self) -> bool {
@@ -285,357 +273,336 @@ impl<T: Clone + 'static> Deque<T> for CatenableDeque<T> {
     }
 
     fn push_front(&self, value: T) -> Self {
-        match self.node.as_ref() {
-            CatNode::Shallow(deque) => Self::shallow(deque.push_front(value)),
-            CatNode::Deep { head, middle, tail } => Self::deep(
-                head.push_front(value),
-                middle.clone(),
-                tail.clone(),
-                self.len() + 1,
-            ),
-        }
+        Self::wrap(self.spine.cons(Elem::Value(Ref::new(value))), self.len + 1)
     }
 
     fn push_back(&self, value: T) -> Self {
-        match self.node.as_ref() {
-            CatNode::Shallow(deque) => Self::shallow(deque.push_back(value)),
-            CatNode::Deep { head, middle, tail } => Self::deep(
-                head.clone(),
-                middle.clone(),
-                tail.push_back(value),
-                self.len() + 1,
-            ),
-        }
+        Self::wrap(self.spine.snoc(Elem::Value(Ref::new(value))), self.len + 1)
     }
 
     fn front(&self) -> Option<Ref<T>> {
-        match self.node.as_ref() {
-            CatNode::Shallow(deque) => deque.front(),
-            CatNode::Deep { head, .. } => head.front(),
-        }
+        self.spine.head().map(Self::unwrap_value)
     }
 
     fn back(&self) -> Option<Ref<T>> {
-        match self.node.as_ref() {
-            CatNode::Shallow(deque) => deque.back(),
-            CatNode::Deep { tail, .. } => tail.back(),
-        }
+        self.spine.last().map(Self::unwrap_value)
     }
 
     fn pop_front(&self) -> Option<(Ref<T>, Self)> {
-        if self.is_empty() {
-            return None;
-        }
-
-        match self.node.as_ref() {
-            CatNode::Shallow(deque) => {
-                let (front, rest) = deque.pop_front()?;
-                Some((front, Self::shallow(rest)))
-            }
-            CatNode::Deep { head, middle, tail } => {
-                if head.len() > 1 {
-                    let (head_front, head_rest) = head.pop_front()?;
-                    Some((
-                        head_front,
-                        Self::deep(head_rest, middle.clone(), tail.clone(), self.len - 1),
-                    ))
-                } else {
-                    let (head_front, _) = head.pop_front()?;
-                    let forced_middle = LazyState::force(middle);
-                    if forced_middle.is_empty() {
-                        Some((head_front, Self::shallow(tail.clone())))
-                    } else {
-                        let (middle_front, middle_rest) = forced_middle.pop_front()?;
-                        let new_head = match middle_front.node.as_ref() {
-                            CatNode::Shallow(deque) => deque.clone(),
-                            // Middle elements are always inserted via `Self::shallow(...)`
-                            // in the `append` paths, so they can never be `Deep`.
-                            CatNode::Deep { .. } => unreachable!(),
-                        };
-                        let new_middle = LazyState::new(move || middle_rest);
-                        Some((
-                            head_front,
-                            Self::deep(new_head, new_middle, tail.clone(), self.len - 1),
-                        ))
-                    }
-                }
-            }
-        }
+        let value = self.front()?;
+        Some((value, Self::wrap(self.spine.tail()?, self.len - 1)))
     }
 
     fn pop_back(&self) -> Option<(Ref<T>, Self)> {
-        if self.is_empty() {
-            return None;
+        let value = self.back()?;
+        Some((value, Self::wrap(self.spine.init()?, self.len - 1)))
+    }
+
+    fn iter(&self) -> Self::Iter {
+        CatenableDequeIterator {
+            stack: vec![Frame::Spine(self.spine.clone())],
         }
+    }
+}
 
-        match self.node.as_ref() {
-            CatNode::Shallow(deque) => {
-                let (back, rest) = deque.pop_back()?;
-                Some((back, Self::shallow(rest)))
-            }
-            CatNode::Deep { head, middle, tail } => {
-                if tail.len() > 1 {
-                    let (tail_back, tail_rest) = tail.pop_back()?;
-                    Some((
-                        tail_back,
-                        Self::deep(head.clone(), middle.clone(), tail_rest, self.len - 1),
-                    ))
-                } else {
-                    let (tail_back, _) = tail.pop_back()?;
-                    let forced_middle = LazyState::force(middle);
+// iteration
 
-                    if forced_middle.is_empty() {
-                        Some((tail_back, Self::shallow(head.clone())))
-                    } else {
-                        let (middle_front, middle_rest) = forced_middle.pop_back()?;
-                        let new_tail = match middle_front.node.as_ref() {
-                            CatNode::Shallow(deque) => deque.clone(),
-                            // Middle elements are always inserted via `Self::shallow(...)`
-                            // in the `append` paths, so they can never be `Deep`.
-                            CatNode::Deep { .. } => unreachable!(),
-                        };
-                        let new_middle = LazyState::new(move || middle_rest);
-                        Some((
-                            tail_back,
-                            Self::deep(head.clone(), new_middle, new_tail, self.len - 1),
-                        ))
+enum Frame<T> {
+    Chunk(BankersDequeIterator<Elem<T>>),
+    // A spine not yet expanded into chunk frames.
+    Spine(Spine<T>),
+}
+
+pub struct CatenableDequeIterator<T> {
+    stack: Vec<Frame<T>>,
+}
+
+impl<T: 'static> Iterator for CatenableDequeIterator<T> {
+    type Item = Ref<T>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            match self.stack.pop()? {
+                Frame::Spine(spine) => match spine.node.as_ref() {
+                    CatNode::Shallow(chunk) => self.stack.push(Frame::Chunk(chunk.iter())),
+                    CatNode::Deep { head, middle, tail } => {
+                        // pushed back-to-front so the stack pops them in order
+                        self.stack.push(Frame::Chunk(tail.iter()));
+                        self.stack.push(Frame::Spine(middle.force()));
+                        self.stack.push(Frame::Chunk(head.iter()));
+                    }
+                },
+                Frame::Chunk(mut chunk) => {
+                    let Some(elem) = chunk.next() else { continue };
+                    self.stack.push(Frame::Chunk(chunk));
+                    match &*elem {
+                        Elem::Value(value) => return Some(value.clone()),
+                        Elem::Chunk(inner) => self.stack.push(Frame::Chunk(inner.iter())),
                     }
                 }
             }
         }
-    }
-
-    fn iter(&self) -> Self::Iter {
-        let mut stack = Vec::new();
-        use CatNode::*;
-
-        match self.node.as_ref() {
-            Shallow(deque) => {
-                stack.push(IterFrame::Data(deque.iter()));
-            }
-            Deep { head, middle, tail } => {
-                stack.push(IterFrame::Data(tail.iter()));
-
-                let forced_middle = LazyState::force(middle);
-                stack.push(IterFrame::Node(forced_middle.iter()));
-
-                stack.push(IterFrame::Data(head.iter()));
-            }
-        }
-
-        CatenableDequeIterator { stack }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::empty::Empty;
+    use std::collections::VecDeque;
 
-    fn create_deque(values: &[i32]) -> CatenableDeque<i32> {
-        let mut d = CatenableDeque::empty();
-        for &v in values {
-            d = d.push_back(v);
-        }
-        d
+    fn build(values: &[i32]) -> CatenableDeque<i32> {
+        values
+            .iter()
+            .fold(CatenableDeque::empty(), |deque, &value| {
+                deque.push_back(value)
+            })
+    }
+
+    fn collect(deque: &CatenableDeque<i32>) -> Vec<i32> {
+        deque.iter().map(|value| *value).collect()
+    }
+
+    fn assert_matches(deque: &CatenableDeque<i32>, model: &VecDeque<i32>) {
+        assert_eq!(deque.len(), model.len(), "len mismatch");
+        assert_eq!(deque.is_empty(), model.is_empty(), "is_empty mismatch");
+        assert_eq!(collect(deque), model.iter().copied().collect::<Vec<_>>());
+        assert_eq!(deque.front().map(|value| *value), model.front().copied());
+        assert_eq!(deque.back().map(|value| *value), model.back().copied());
     }
 
     #[test]
-    fn test_empty_and_is_empty() {
-        let d: CatenableDeque<i32> = CatenableDeque::empty();
-        assert!(d.is_empty());
-        assert_eq!(d.len(), 0);
-        assert!(d.front().is_none());
-        assert!(d.back().is_none());
-        assert!(d.pop_front().is_none());
-        assert!(d.pop_back().is_none());
+    fn test_empty_deque() {
+        let deque: CatenableDeque<i32> = CatenableDeque::empty();
+        assert!(deque.is_empty());
+        assert_eq!(deque.len(), 0);
+        assert!(deque.front().is_none());
+        assert!(deque.back().is_none());
+        assert!(deque.pop_front().is_none());
+        assert!(deque.pop_back().is_none());
     }
 
     #[test]
-    fn test_push_front() {
-        let d = CatenableDeque::empty()
+    fn test_push_front_reverses_order() {
+        let deque = CatenableDeque::empty()
             .push_front(1)
             .push_front(2)
             .push_front(3);
-
-        // [3, 2, 1]
-        assert!(!d.is_empty());
-        assert_eq!(d.len(), 3);
-        assert_eq!(*d.front().unwrap(), 3);
-        assert_eq!(*d.back().unwrap(), 1);
+        assert_eq!(collect(&deque), vec![3, 2, 1]);
+        assert_eq!(*deque.front().unwrap(), 3);
+        assert_eq!(*deque.back().unwrap(), 1);
+        assert_eq!(deque.len(), 3);
     }
 
     #[test]
-    fn test_push_back() {
-        let d = CatenableDeque::empty()
-            .push_back(1)
-            .push_back(2)
-            .push_back(3);
-
-        // [1, 2, 3]
-        assert!(!d.is_empty());
-        assert_eq!(d.len(), 3);
-        assert_eq!(*d.front().unwrap(), 1);
-        assert_eq!(*d.back().unwrap(), 3);
+    fn test_push_back_keeps_order() {
+        let deque = build(&[1, 2, 3]);
+        assert_eq!(collect(&deque), vec![1, 2, 3]);
+        assert_eq!(*deque.front().unwrap(), 1);
+        assert_eq!(*deque.back().unwrap(), 3);
+        assert_eq!(deque.len(), 3);
     }
 
     #[test]
-    fn test_pop_front_fifo() {
-        let d = create_deque(&[1, 2, 3]);
-
-        let (v1, d1) = d.pop_front().expect("Should not be empty");
-        assert_eq!(*v1, 1);
-        assert_eq!(d1.len(), 2);
-
-        let (v2, d2) = d1.pop_front().expect("Should not be empty");
-        assert_eq!(*v2, 2);
-        assert_eq!(d2.len(), 1);
-
-        let (v3, d3) = d2.pop_front().expect("Should not be empty");
-        assert_eq!(*v3, 3);
-        assert!(d3.is_empty());
+    fn test_drain_from_front() {
+        let mut deque = build(&(0..64).collect::<Vec<_>>());
+        for expected in 0..64 {
+            let (value, rest) = deque.pop_front().expect("still non-empty");
+            assert_eq!(*value, expected);
+            deque = rest;
+        }
+        assert!(deque.is_empty());
     }
 
     #[test]
-    fn test_pop_front_lifo() {
-        let d = CatenableDeque::empty().push_front(1).push_front(2);
-
-        let (v1, d1) = d.pop_front().unwrap();
-        assert_eq!(*v1, 2);
-
-        let (v2, _) = d1.pop_front().unwrap();
-        assert_eq!(*v2, 1);
+    fn test_drain_from_back() {
+        let mut deque = build(&(0..64).collect::<Vec<_>>());
+        for expected in (0..64).rev() {
+            let (value, rest) = deque.pop_back().expect("still non-empty");
+            assert_eq!(*value, expected);
+            deque = rest;
+        }
+        assert!(deque.is_empty());
     }
 
     #[test]
-    fn test_pop_back() {
-        let d = create_deque(&[1, 2, 3]);
-
-        // pop 3
-        let (v1, d1) = d.pop_back().unwrap();
-        assert_eq!(*v1, 3);
-        assert_eq!(d1.len(), 2);
-        assert_eq!(*d1.back().unwrap(), 2);
-
-        // pop 2
-        let (v2, d2) = d1.pop_back().unwrap();
-        assert_eq!(*v2, 2);
-
-        // pop 1
-        let (v3, d3) = d2.pop_back().unwrap();
-        assert_eq!(*v3, 1);
-        assert!(d3.is_empty());
+    fn test_front_and_back_do_not_consume() {
+        let deque = build(&[10, 20, 30, 40]);
+        assert_eq!(*deque.front().unwrap(), 10);
+        assert_eq!(*deque.back().unwrap(), 40);
+        assert_eq!(deque.len(), 4);
     }
 
     #[test]
-    fn test_front_and_back_consistency() {
-        let d = create_deque(&[10, 20, 30, 40]);
+    fn test_earlier_versions_are_unaffected() {
+        let empty = CatenableDeque::empty();
+        let one = empty.push_back(1);
+        let two = one.push_back(2);
 
-        assert_eq!(*d.front().unwrap(), 10);
-        assert_eq!(*d.back().unwrap(), 40);
-        assert_eq!(d.len(), 4); // front/back doesn't mutate or consume
-    }
+        assert!(empty.is_empty());
+        assert_eq!(one.len(), 1);
+        assert_eq!(two.len(), 2);
 
-    #[test]
-    fn test_persistence() {
-        // operations do not affect previous versions
-        let d0 = CatenableDeque::empty();
-        let d1 = d0.push_back(1);
-        let d2 = d1.push_back(2);
-
-        assert!(d0.is_empty());
-        assert_eq!(d1.len(), 1);
-        assert_eq!(d2.len(), 2);
-
-        let (_, d2_popped) = d2.pop_front().unwrap();
-        assert_eq!(d2.len(), 2); // d2 still exists unmodified
-        assert_eq!(d2_popped.len(), 1);
+        let (_, popped) = two.pop_front().unwrap();
+        assert_eq!(two.len(), 2);
+        assert_eq!(popped.len(), 1);
     }
 
     #[test]
     fn test_append_basic() {
-        let left = create_deque(&[1, 2]);
-        let right = create_deque(&[3, 4]);
-        let combined = left.append(&right);
-
+        let combined = build(&[1, 2]).append(&build(&[3, 4]));
+        assert_eq!(collect(&combined), vec![1, 2, 3, 4]);
         assert_eq!(combined.len(), 4);
         assert_eq!(*combined.front().unwrap(), 1);
         assert_eq!(*combined.back().unwrap(), 4);
-
-        // drain to verify order
-        let mut vals = Vec::new();
-        let mut curr = combined;
-        while let Some((v, next)) = curr.pop_front() {
-            vals.push(*v);
-            curr = next;
-        }
-        assert_eq!(vals, vec![1, 2, 3, 4]);
     }
 
     #[test]
     fn test_append_with_empty() {
-        let d = create_deque(&[1, 2, 3]);
+        let deque = build(&[1, 2, 3]);
         let empty = CatenableDeque::empty();
-
-        let d_left = empty.append(&d);
-        assert_eq!(d_left.len(), 3);
-        assert_eq!(*d_left.front().unwrap(), 1);
-
-        let d_right = d.append(&empty);
-        assert_eq!(d_right.len(), 3);
-        assert_eq!(*d_right.back().unwrap(), 3);
+        assert_eq!(collect(&empty.append(&deque)), vec![1, 2, 3]);
+        assert_eq!(collect(&deque.append(&empty)), vec![1, 2, 3]);
+        assert!(empty.append(&empty).is_empty());
     }
 
     #[test]
-    fn test_deep_append_recursive() {
-        // append multiple large queues to trigger the 'Deep' node logic
-        let d1 = create_deque(&[1, 2, 3, 4]);
-        let d2 = create_deque(&[5, 6, 7, 8]);
-        let huge = d1.append(&d2); // [1..8]
-        assert_eq!(huge.len(), 8);
+    fn test_append_is_associative() {
+        let left = build(&[1, 2, 3, 4]);
+        let middle = build(&[5, 6, 7, 8]);
+        let right = build(&[9, 10, 11, 12]);
+        let expected: Vec<i32> = (1..=12).collect();
 
-        // append another Deep node to the result
-        let d3 = create_deque(&[9, 10, 11, 12]);
-        let massive = huge.append(&d3); // [1..12]
-        assert_eq!(massive.len(), 12);
-        assert_eq!(*massive.front().unwrap(), 1);
-        assert_eq!(*massive.back().unwrap(), 12);
-
-        // drain to verify order
-        let mut count = 0;
-        let mut curr = massive;
-        while let Some((v, next)) = curr.pop_front() {
-            count += 1;
-            assert_eq!(*v, count, "Mismatch at index {}", count);
-            curr = next;
-        }
-        assert_eq!(count, 12);
+        assert_eq!(collect(&left.append(&middle).append(&right)), expected);
+        assert_eq!(collect(&left.append(&middle.append(&right))), expected);
     }
 
     #[test]
-    fn test_deep_pop_back() {
-        // correctly traverse a Deep structure backwards
-        let d1 = create_deque(&[1, 2, 3]);
-        let d2 = create_deque(&[4, 5, 6]);
-        let combined = d1.append(&d2);
-
-        let mut count = 6;
-        let mut curr = combined;
-        while let Some((v, next)) = curr.pop_back() {
-            assert_eq!(*v, count);
-            count -= 1;
-            curr = next;
+    fn test_deep_append_then_drain_both_ends() {
+        let mut deque = build(&[0, 1, 2, 3]);
+        let mut expected: Vec<i32> = vec![0, 1, 2, 3];
+        for step in 1..200 {
+            let chunk: Vec<i32> = (step * 4..step * 4 + 4).collect();
+            deque = deque.append(&build(&chunk));
+            expected.extend(chunk);
         }
-        assert_eq!(count, 0);
+        assert_eq!(collect(&deque), expected);
+
+        let (mut front, mut back) = (0usize, expected.len());
+        let mut current = deque;
+        while front < back {
+            let (value, rest) = current.pop_front().expect("non-empty");
+            assert_eq!(*value, expected[front]);
+            front += 1;
+            current = rest;
+            if front < back {
+                let (value, rest) = current.pop_back().expect("non-empty");
+                assert_eq!(*value, expected[back - 1]);
+                back -= 1;
+                current = rest;
+            }
+        }
+        assert!(current.is_empty());
     }
 
     #[test]
-    fn test_iter() {
-        let d = create_deque(&[10, 20, 30, 40, 50, 60, 70, 80, 90, 100]);
-        let mut iter = d.iter();
-        for i in 1..=10 {
-            let expected = i * 10;
-            assert_eq!(iter.next(), Some(Ref::new(expected)));
+    fn test_iterates_a_deep_structure() {
+        // built by catenation, so the spine is actually populated
+        let deque = build(&[10, 20, 30])
+            .append(&build(&[40, 50, 60]))
+            .append(&build(&[70, 80, 90, 100]));
+        assert_eq!(
+            collect(&deque),
+            vec![10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
+        );
+    }
+
+    struct Xorshift(u64);
+
+    impl Xorshift {
+        fn next(&mut self) -> u64 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            self.0
         }
-        assert!(iter.next().is_none());
+
+        fn below(&mut self, bound: usize) -> usize {
+            (self.next() % bound as u64) as usize
+        }
+    }
+
+    // Randomised differential test against `VecDeque`
+    // Keeping a pool of versions alive so the structure is exercised persistently.
+    #[test]
+    fn test_matches_vecdeque_model() {
+        const MAX_LEN: usize = 3000;
+        let mut random = Xorshift(0x2545_F491_4F6C_DD1D);
+        let mut pool: Vec<(CatenableDeque<i32>, VecDeque<i32>)> =
+            vec![(CatenableDeque::empty(), VecDeque::new())];
+        let mut next_value = 0i32;
+
+        for _ in 0..4000 {
+            let index = random.below(pool.len());
+            let (deque, model) = pool[index].clone();
+
+            let (new_deque, new_model) = match random.below(6) {
+                0 => {
+                    let value = next_value;
+                    next_value += 1;
+                    let mut model = model;
+                    model.push_front(value);
+                    (deque.push_front(value), model)
+                }
+                1 => {
+                    let value = next_value;
+                    next_value += 1;
+                    let mut model = model;
+                    model.push_back(value);
+                    (deque.push_back(value), model)
+                }
+                2 => match deque.pop_front() {
+                    None => {
+                        assert!(model.is_empty());
+                        continue;
+                    }
+                    Some((value, rest)) => {
+                        let mut model = model;
+                        assert_eq!(Some(*value), model.pop_front());
+                        (rest, model)
+                    }
+                },
+                3 => match deque.pop_back() {
+                    None => {
+                        assert!(model.is_empty());
+                        continue;
+                    }
+                    Some((value, rest)) => {
+                        let mut model = model;
+                        assert_eq!(Some(*value), model.pop_back());
+                        (rest, model)
+                    }
+                },
+                _ => {
+                    let other_index = random.below(pool.len());
+                    let (other_deque, other_model) = pool[other_index].clone();
+                    if model.len() + other_model.len() > MAX_LEN {
+                        continue;
+                    }
+                    let mut model = model;
+                    model.extend(other_model.iter().copied());
+                    (deque.append(&other_deque), model)
+                }
+            };
+
+            assert_matches(&new_deque, &new_model);
+
+            if pool.len() < 40 {
+                pool.push((new_deque, new_model));
+            } else {
+                let victim = random.below(pool.len());
+                pool[victim] = (new_deque, new_model);
+            }
+        }
     }
 }
