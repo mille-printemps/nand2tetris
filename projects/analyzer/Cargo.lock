@@ -6,10 +6,19 @@ version = 3
 name = "analyzer"
 version = "0.1.0"
 dependencies = [
+ "cli",
  "collections",
  "functional",
  "parser",
  "tokenizer",
+]
+
+[[package]]
+name = "cli"
+version = "0.1.0"
+dependencies = [
+ "collections",
+ "functional",
 ]
 
 [[package]]
