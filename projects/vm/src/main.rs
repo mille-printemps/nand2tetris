@@ -1,4 +1,4 @@
-use cli::{abort, join_lines, resolve, run_on_large_stack, SourceKind};
+use cli::{abort, fail, is_blank, join_lines, resolve, run_on_large_stack, SourceKind};
 use collections::catdeque::CatenableDeque;
 use collections::deque::*;
 use collections::Empty;
@@ -16,7 +16,7 @@ fn translate<'a>(
     lines: &'a [&'a str],
     file_stem: &'a str,
     file_index: usize,
-) -> Result<CatenableDeque<String>, &'a str> {
+) -> Result<CatenableDeque<String>, String> {
     const SENTINEL: &str = "\0";
 
     let command = command();
@@ -66,54 +66,55 @@ fn translate<'a>(
                     Some(current) if current != SENTINEL => {
                         match command.parse(current) {
                             // Push
-                            Ok(("", Command::Push(segment, index))) => {
-                                index
-                                    .parse::<u32>()
-                                    .map_or(Err("Failed to translate"), |_| {
-                                        let assembly_code = match segment.as_str() {
-                                            "local" => Some(
-                                                SEGMENT
-                                                    .replace("{segment}", "LCL")
-                                                    .replace("{index}", &index),
-                                            ),
-                                            "argument" => Some(
-                                                SEGMENT
-                                                    .replace("{segment}", "ARG")
-                                                    .replace("{index}", &index),
-                                            ),
-                                            "this" => Some(
-                                                SEGMENT
+                            Ok(("", Command::Push(segment, index))) => index.parse::<u32>().map_or(
+                                Err(format!("failed to translate: {}", current)),
+                                |_| {
+                                    let assembly_code = match segment.as_str() {
+                                        "local" => Some(
+                                            SEGMENT
+                                                .replace("{segment}", "LCL")
+                                                .replace("{index}", &index),
+                                        ),
+                                        "argument" => Some(
+                                            SEGMENT
+                                                .replace("{segment}", "ARG")
+                                                .replace("{index}", &index),
+                                        ),
+                                        "this" => Some(
+                                            SEGMENT
+                                                .replace("{segment}", "THIS")
+                                                .replace("{index}", &index),
+                                        ),
+                                        "that" => Some(
+                                            SEGMENT
+                                                .replace("{segment}", "THAT")
+                                                .replace("{index}", &index),
+                                        ),
+                                        "temp" => Some(TEMP.replace("{index}", &index)),
+                                        "pointer" => match index.as_str() {
+                                            "0" => Some(
+                                                POINTER
                                                     .replace("{segment}", "THIS")
-                                                    .replace("{index}", &index),
+                                                    .replace("{index}", "0"),
                                             ),
-                                            "that" => Some(
-                                                SEGMENT
+                                            "1" => Some(
+                                                POINTER
                                                     .replace("{segment}", "THAT")
-                                                    .replace("{index}", &index),
+                                                    .replace("{index}", "1"),
                                             ),
-                                            "temp" => Some(TEMP.replace("{index}", &index)),
-                                            "pointer" => match index.as_str() {
-                                                "0" => Some(
-                                                    POINTER
-                                                        .replace("{segment}", "THIS")
-                                                        .replace("{index}", "0"),
-                                                ),
-                                                "1" => Some(
-                                                    POINTER
-                                                        .replace("{segment}", "THAT")
-                                                        .replace("{index}", "1"),
-                                                ),
-                                                _ => None,
-                                            },
-                                            "static" => Some(
-                                                STATIC
-                                                    .replace("{file}", file_stem)
-                                                    .replace("{index}", &index),
-                                            ),
-                                            "constant" => Some(CONSTANT.replace("{index}", &index)),
                                             _ => None,
-                                        };
-                                        assembly_code.map_or(Err("Failed to translate"), |code| {
+                                        },
+                                        "static" => Some(
+                                            STATIC
+                                                .replace("{file}", file_stem)
+                                                .replace("{index}", &index),
+                                        ),
+                                        "constant" => Some(CONSTANT.replace("{index}", &index)),
+                                        _ => None,
+                                    };
+                                    assembly_code.map_or(
+                                        Err(format!("failed to translate: {}", current)),
+                                        |code| {
                                             Ok((
                                                 assembly
                                                     .push_back(format!("// push {segment} {index}"))
@@ -126,53 +127,55 @@ fn translate<'a>(
                                                 caller_stack,
                                                 Some(incoming),
                                             ))
-                                        })
-                                    })
-                            }
+                                        },
+                                    )
+                                },
+                            ),
                             // Pop
-                            Ok(("", Command::Pop(segment, index))) => {
-                                index
-                                    .parse::<u32>()
-                                    .map_or(Err("Failed to translante"), |_| {
-                                        let assembly_code = match segment.as_str() {
-                                            "local" => Some(
-                                                SEGMENT_ADDRESS
-                                                    .replace("{segment}", "LCL")
-                                                    .replace("{index}", &index),
-                                            ),
-                                            "argument" => Some(
-                                                SEGMENT_ADDRESS
-                                                    .replace("{segment}", "ARG")
-                                                    .replace("{index}", &index),
-                                            ),
-                                            "this" => Some(
-                                                SEGMENT_ADDRESS
-                                                    .replace("{segment}", "THIS")
-                                                    .replace("{index}", &index),
-                                            ),
-                                            "that" => Some(
-                                                SEGMENT_ADDRESS
-                                                    .replace("{segment}", "THAT")
-                                                    .replace("{index}", &index),
-                                            ),
-                                            "temp" => Some(TEMP_ADDRESS.replace("{index}", &index)),
-                                            "pointer" => match index.as_str() {
-                                                "0" => Some(
-                                                    POINTER_ADDRESS.replace("{segment}", "THIS"),
-                                                ),
-                                                "1" => Some(
-                                                    POINTER_ADDRESS.replace("{segment}", "THAT"),
-                                                ),
-                                                _ => None,
-                                            },
-                                            "static" => Some(
-                                                STAIC_ADDRESS
-                                                    .replace("{file}", file_stem)
-                                                    .replace("{index}", &index),
-                                            ),
+                            Ok(("", Command::Pop(segment, index))) => index.parse::<u32>().map_or(
+                                Err(format!("failed to translate: {}", current)),
+                                |_| {
+                                    let assembly_code = match segment.as_str() {
+                                        "local" => Some(
+                                            SEGMENT_ADDRESS
+                                                .replace("{segment}", "LCL")
+                                                .replace("{index}", &index),
+                                        ),
+                                        "argument" => Some(
+                                            SEGMENT_ADDRESS
+                                                .replace("{segment}", "ARG")
+                                                .replace("{index}", &index),
+                                        ),
+                                        "this" => Some(
+                                            SEGMENT_ADDRESS
+                                                .replace("{segment}", "THIS")
+                                                .replace("{index}", &index),
+                                        ),
+                                        "that" => Some(
+                                            SEGMENT_ADDRESS
+                                                .replace("{segment}", "THAT")
+                                                .replace("{index}", &index),
+                                        ),
+                                        "temp" => Some(TEMP_ADDRESS.replace("{index}", &index)),
+                                        "pointer" => match index.as_str() {
+                                            "0" => {
+                                                Some(POINTER_ADDRESS.replace("{segment}", "THIS"))
+                                            }
+                                            "1" => {
+                                                Some(POINTER_ADDRESS.replace("{segment}", "THAT"))
+                                            }
                                             _ => None,
-                                        };
-                                        assembly_code.map_or(Err("Failed to translate"), |code| {
+                                        },
+                                        "static" => Some(
+                                            STAIC_ADDRESS
+                                                .replace("{file}", file_stem)
+                                                .replace("{index}", &index),
+                                        ),
+                                        _ => None,
+                                    };
+                                    assembly_code.map_or(
+                                        Err(format!("failed to translate: {}", current)),
+                                        |code| {
                                             Ok((
                                                 assembly
                                                     .push_back(format!("// pop {segment} {index}"))
@@ -186,9 +189,10 @@ fn translate<'a>(
                                                 caller_stack,
                                                 Some(incoming),
                                             ))
-                                        })
-                                    })
-                            }
+                                        },
+                                    )
+                                },
+                            ),
                             // Operator
                             Ok(("", Command::Arithmetic(operator))) => {
                                 let assembly_code = match operator.as_str() {
@@ -215,19 +219,22 @@ fn translate<'a>(
                                     ),
                                     _ => None,
                                 };
-                                assembly_code.map_or(Err("Failed to translate"), |code| {
-                                    Ok((
-                                        assembly
-                                            .push_back(format!("// {operator}"))
-                                            .push_back(code),
-                                        eq_index + if operator.eq("eq") { 1 } else { 0 },
-                                        gt_index + if operator.eq("gt") { 1 } else { 0 },
-                                        lt_index + if operator.eq("lt") { 1 } else { 0 },
-                                        callee_index,
-                                        caller_stack,
-                                        Some(incoming),
-                                    ))
-                                })
+                                assembly_code.map_or(
+                                    Err(format!("failed to translate: {}", current)),
+                                    |code| {
+                                        Ok((
+                                            assembly
+                                                .push_back(format!("// {operator}"))
+                                                .push_back(code),
+                                            eq_index + if operator.eq("eq") { 1 } else { 0 },
+                                            gt_index + if operator.eq("gt") { 1 } else { 0 },
+                                            lt_index + if operator.eq("lt") { 1 } else { 0 },
+                                            callee_index,
+                                            caller_stack,
+                                            Some(incoming),
+                                        ))
+                                    },
+                                )
                             }
                             // Label
                             Ok(("", Command::Label(label))) => {
@@ -238,17 +245,22 @@ fn translate<'a>(
                                         .back()
                                         .map(|function| format!("({function}${label})"))
                                 };
-                                assembly_code.map_or(Err("Failed to translate"), |code| {
-                                    Ok((
-                                        assembly.push_back(format!("// {label}")).push_back(code),
-                                        eq_index,
-                                        gt_index,
-                                        lt_index,
-                                        callee_index,
-                                        caller_stack,
-                                        Some(incoming),
-                                    ))
-                                })
+                                assembly_code.map_or(
+                                    Err(format!("failed to translate: {}", current)),
+                                    |code| {
+                                        Ok((
+                                            assembly
+                                                .push_back(format!("// {label}"))
+                                                .push_back(code),
+                                            eq_index,
+                                            gt_index,
+                                            lt_index,
+                                            callee_index,
+                                            caller_stack,
+                                            Some(incoming),
+                                        ))
+                                    },
+                                )
                             }
                             // Goto
                             Ok(("", Command::Goto(label))) => {
@@ -259,20 +271,23 @@ fn translate<'a>(
                                         .back()
                                         .map(|function| format!("@{function}${label}"))
                                 };
-                                assembly_code.map_or(Err("Failed to translate"), |code| {
-                                    Ok((
-                                        assembly
-                                            .push_back(format!("// goto {label}"))
-                                            .push_back(code)
-                                            .push_back("0;JMP".to_string()),
-                                        eq_index,
-                                        gt_index,
-                                        lt_index,
-                                        callee_index,
-                                        caller_stack,
-                                        Some(incoming),
-                                    ))
-                                })
+                                assembly_code.map_or(
+                                    Err(format!("failed to translate: {}", current)),
+                                    |code| {
+                                        Ok((
+                                            assembly
+                                                .push_back(format!("// goto {label}"))
+                                                .push_back(code)
+                                                .push_back("0;JMP".to_string()),
+                                            eq_index,
+                                            gt_index,
+                                            lt_index,
+                                            callee_index,
+                                            caller_stack,
+                                            Some(incoming),
+                                        ))
+                                    },
+                                )
                             }
                             // If-Goto
                             Ok(("", Command::IfGoto(label))) => {
@@ -289,24 +304,27 @@ fn translate<'a>(
                                             .replace("{label}", &format!("{function}${label}"))
                                     })
                                 };
-                                assembly_code.map_or(Err("Failed to translate"), |code| {
-                                    Ok((
-                                        assembly
-                                            .push_back(format!("// if-goto {label}"))
-                                            .push_back(code),
-                                        eq_index,
-                                        gt_index,
-                                        lt_index,
-                                        callee_index,
-                                        caller_stack,
-                                        Some(incoming),
-                                    ))
-                                })
+                                assembly_code.map_or(
+                                    Err(format!("failed to translate: {}", current)),
+                                    |code| {
+                                        Ok((
+                                            assembly
+                                                .push_back(format!("// if-goto {label}"))
+                                                .push_back(code),
+                                            eq_index,
+                                            gt_index,
+                                            lt_index,
+                                            callee_index,
+                                            caller_stack,
+                                            Some(incoming),
+                                        ))
+                                    },
+                                )
                             }
                             // Function
                             Ok(("", Command::Function(caller, nvers))) => nvers
                                 .parse::<usize>()
-                                .map_or(Err("Failed to translate"), |vers| {
+                                .map_or(Err(format!("failed to translate: {}", current)), |vers| {
                                     Ok((
                                         assembly
                                             .push_back(format!("// function {caller} {nvers}"))
@@ -347,7 +365,7 @@ fn translate<'a>(
                                         caller_stack,
                                         Some(incoming),
                                     )),
-                                    _ => Err("Failed to translate"),
+                                    _ => Err(format!("failed to translate: {}", current)),
                                 }
                             }
                             // Return
@@ -357,11 +375,10 @@ fn translate<'a>(
                                     Ok(caller_stack)
                                 // otherwise, pop the caller stack and continue
                                 } else {
-                                    caller_stack
-                                        .pop_back()
-                                        .map_or(Err(""), |(_, next_caller_stack)| {
-                                            Ok(next_caller_stack)
-                                        })
+                                    caller_stack.pop_back().map_or(
+                                        Err(format!("return without a matching call: {}", current)),
+                                        |(_, next_caller_stack)| Ok(next_caller_stack),
+                                    )
                                 }
                                 .and_then(|next_caller_stack| {
                                     Ok((
@@ -377,7 +394,7 @@ fn translate<'a>(
                                     ))
                                 })
                             }
-                            Err(_) => Ok((
+                            Err(_) if is_blank(current) => Ok((
                                 assembly,
                                 eq_index,
                                 gt_index,
@@ -386,7 +403,8 @@ fn translate<'a>(
                                 caller_stack,
                                 Some(incoming),
                             )),
-                            _ => Err("Failed to translate"),
+                            Err(_) => Err(format!("could not parse command: {}", current)),
+                            _ => Err(format!("unrecognized command: {}", current)),
                         }
                     }
                     _ => Ok((
@@ -429,24 +447,34 @@ fn run(argument: Option<String>) {
         .fold(
             IO::Return(CatenableDeque::<String>::empty()),
             |acc, (file_index, path)| {
+                let path_string = path.to_string();
                 let file_stem = PathBuf::from(path.as_str())
                     .file_stem()
-                    .unwrap()
-                    .to_string_lossy()
-                    .into_owned();
-                IO::<String>::read_file(path.to_string()).flat_map(move |content| {
-                    let commands = content.lines().collect::<Vec<&str>>();
-                    translate(&commands, &file_stem, file_index + offset).map_or_else(
-                        |error| IO::Error(error.to_string()),
-                        |assembly| acc.map(move |deque| deque.append(&assembly)),
-                    )
-                })
+                    .map(|stem| stem.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "Main".to_string());
+
+                let read_context = path_string.clone();
+                let translate_context = path_string.clone();
+
+                IO::<String>::read_file(path_string)
+                    .map_err(move |error| format!("{}: {}", read_context, error))
+                    .flat_map(move |content| {
+                        let commands = content.lines().collect::<Vec<&str>>();
+                        translate(&commands, &file_stem, file_index + offset).map_or_else(
+                            move |error| IO::Error(format!("{}: {}", translate_context, error)),
+                            |assembly| acc.map(move |deque| deque.append(&assembly)),
+                        )
+                    })
             },
         )
         // After processing all files, write a single combined result
-        .flat_map(|assembly| IO::<String>::write_file(output, join_lines(&assembly)))
+        .flat_map(|assembly| {
+            let write_context = output.clone();
+            IO::<String>::write_file(output, join_lines(&assembly))
+                .map_err(move |error| format!("{}: {}", write_context, error))
+        })
         .unsafe_run()
-        .unwrap_or_else(|e| panic!("Failed to process files: {}", e));
+        .unwrap_or_else(|error| fail(&error));
 }
 
 fn main() {

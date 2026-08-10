@@ -65,6 +65,20 @@ impl<'a, A> IO<'a, A> {
             IO::Error(e) => Err(e),
         }
     }
+
+    // Transforms the error, leaving Return/Suspend untouched.
+    // Lets a caller attach context (e.g. which file was being read) without unwrapping.
+    pub fn map_err<F>(self, f: F) -> IO<'a, A>
+    where
+        F: FnOnce(String) -> String + 'a,
+        A: 'a,
+    {
+        match self {
+            IO::Return(a) => IO::Return(a),
+            IO::Suspend(thunk) => IO::Suspend(Box::new(move || thunk().map_err(f))),
+            IO::Error(e) => IO::Error(f(e)),
+        }
+    }
 }
 
 #[cfg(test)]

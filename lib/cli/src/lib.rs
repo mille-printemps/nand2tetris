@@ -93,6 +93,21 @@ pub fn abort(error: SourceError, usage: &str) -> ! {
     process::exit(1);
 }
 
+// Reports a message (already carrying whatever context the caller attached, e.g. a file name) and exits non-zero.
+// Used once a Source has been resolved, where failures are about processing a file rather than finding one.
+pub fn fail(message: &str) -> ! {
+    eprintln!("{}: {}", program_name(), message);
+    process::exit(1);
+}
+
+// A source line with nothing for a translator to do: blank, or a comment on its own.
+// Shared by asm and vm so both can tell a line that's legitimately empty from a genuine parse failure,
+// and report the latter instead of silently dropping it.
+pub fn is_blank(line: &str) -> bool {
+    let trimmed = line.trim();
+    trimmed.is_empty() || trimmed.starts_with("//")
+}
+
 // The running program's name, without directory or extension.
 pub fn program_name() -> String {
     std::env::args()
@@ -232,18 +247,25 @@ pub fn sibling_path(input: &str, suffix: &str) -> String {
         .into_owned()
 }
 
-// Reads input, applies transform, writes the result to output.
+// Reads input, applies transform, writes the result to output
+// Every failure is tagged with the path it happened on
 pub fn process_file<F>(input: String, output: String, transform: F)
 where
     F: FnOnce(String) -> Result<String, String> + 'static,
 {
+    let read_context = input.clone();
+    let transform_context = input.clone();
+    let write_context = output.clone();
+
     IO::<String>::read_file(input)
+        .map_err(move |error| format!("{}: {}", read_context, error))
         .flat_map(move |content: String| match transform(content) {
-            Ok(result) => IO::<String>::write_file(output, result),
-            Err(error) => IO::Error(error),
+            Ok(result) => IO::<String>::write_file(output, result)
+                .map_err(move |error| format!("{}: {}", write_context, error)),
+            Err(error) => IO::Error(format!("{}: {}", transform_context, error)),
         })
         .unsafe_run()
-        .unwrap_or_else(|error| panic!("Error: {}", error));
+        .unwrap_or_else(|error| fail(&error));
 }
 
 // Joins a deque of lines with newlines — the shape every tool's output takes.

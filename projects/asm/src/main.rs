@@ -1,4 +1,6 @@
-use cli::{abort, join_lines, process_file, resolve_file, run_on_large_stack, sibling_path};
+use cli::{
+    abort, is_blank, join_lines, process_file, resolve_file, run_on_large_stack, sibling_path,
+};
 use collections::deque::*;
 use collections::hashmap::*;
 use instruction::*;
@@ -8,33 +10,38 @@ use translation::*;
 mod instruction;
 mod translation;
 
-fn preprocess<'a>(lines: &[&str]) -> Result<HashMap<String, u32>, &'a str> {
+fn preprocess(lines: &[&str]) -> Result<HashMap<String, u32>, String> {
     let instruction = instruction();
     let symbol_table = symbol_table();
 
     lines
         .iter()
+        .enumerate()
         .try_fold(
             (0, symbol_table),
-            |(line_number, symbol_table), &line| match instruction.parse(line) {
+            |(line_number, symbol_table), (index, &line)| match instruction.parse(line) {
                 Ok(("", Instruction::L(symbol))) => {
                     Ok((line_number, symbol_table.insert(symbol, line_number)))
                 }
                 Ok(("", Instruction::A(_))) | Ok(("", Instruction::C(_, _, _))) => {
                     Ok((line_number + 1, symbol_table))
                 }
-                Err(_) => Ok((line_number, symbol_table)),
-                _ => Err("Filed to preprocess"),
+                Err(_) if is_blank(line) => Ok((line_number, symbol_table)),
+                _ => Err(format!(
+                    "line {}: not a valid instruction: {}",
+                    index + 1,
+                    line.trim()
+                )),
             },
         )
         .map(|(_, symbol_table)| symbol_table)
 }
 
-fn assemble<'a, D: Deque<String>>(
+fn assemble<D: Deque<String>>(
     lines: &[&str],
     symbol_table: HashMap<String, u32>,
     code: D,
-) -> Result<D, &'a str> {
+) -> Result<D, String> {
     let available_address = 16;
     let code = code;
     let instruction = instruction();
@@ -44,9 +51,11 @@ fn assemble<'a, D: Deque<String>>(
 
     lines
         .iter()
+        .enumerate()
         .try_fold(
             (symbol_table, available_address, code),
-            |(symbol_table, available_address, code), &line| match instruction.parse(line) {
+            |(symbol_table, available_address, code), (index, &line)| match instruction.parse(line)
+            {
                 Ok(("", Instruction::L(_))) => Ok((symbol_table, available_address, code)),
                 Ok(("", Instruction::A(symbol))) => match symbol.parse::<u32>() {
                     Ok(decimal) => Ok((
@@ -80,11 +89,19 @@ fn assemble<'a, D: Deque<String>>(
                             available_address,
                             code.push_back(format!("111{}{}{}", comp_bin, dest_bin, jump_bin)),
                         )),
-                        _ => Err("Failed to assemble"),
+                        _ => Err(format!(
+                            "line {}: invalid dest/comp/jump in: {}",
+                            index + 1,
+                            line.trim()
+                        )),
                     }
                 }
-                Err(_) => Ok((symbol_table, available_address, code)),
-                _ => Err("Failed to assemble"),
+                Err(_) if is_blank(line) => Ok((symbol_table, available_address, code)),
+                _ => Err(format!(
+                    "line {}: not a valid instruction: {}",
+                    index + 1,
+                    line.trim()
+                )),
             },
         )
         .map(|(_, _, code)| code)
@@ -94,8 +111,8 @@ const USAGE: &str = "<file.asm>";
 
 fn translate<D: Deque<String>>(source: &str) -> Result<String, String> {
     let lines = source.lines().collect::<Vec<&str>>();
-    let symbol_table = preprocess(&lines).map_err(str::to_string)?;
-    let binary = assemble::<D>(&lines, symbol_table, D::empty()).map_err(str::to_string)?;
+    let symbol_table = preprocess(&lines)?;
+    let binary = assemble::<D>(&lines, symbol_table, D::empty())?;
     Ok(join_lines(&binary))
 }
 
