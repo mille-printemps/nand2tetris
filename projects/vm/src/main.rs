@@ -1,3 +1,4 @@
+use cli::{abort, join_lines, resolve, run_on_large_stack, SourceKind};
 use collections::catdeque::CatenableDeque;
 use collections::deque::*;
 use collections::Empty;
@@ -5,11 +6,7 @@ use command::*;
 use functional::functor::*;
 use functional::io::*;
 use parser::parser::Parser;
-use std::env;
-use std::fs;
-use std::path::Path;
 use std::path::PathBuf;
-use std::process;
 use translation::*;
 
 mod command;
@@ -407,96 +404,26 @@ fn translate<'a>(
         .map(|(assembly, _, _, _, _, _, _)| assembly.push_back("\n".to_string()))
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum SourceType {
-    File,
-    Directory,
-}
+const USAGE: &str = "<file.vm | folder containing .vm files>";
 
-struct Source<D: Deque<String>> {
-    source_type: SourceType,
-    dir: String,
-    file_paths: D,
-}
-
-fn get_file_paths<D: Deque<String>>(dir: &str, ext: &str, paths: D) -> D {
-    fs::read_dir(dir).map_or(D::empty(), |entries| {
-        entries.flatten().fold(paths, |paths, entry| {
-            let path = entry.path();
-            if path.is_file() && path.extension().and_then(|e| e.to_str()) == Some(ext) {
-                return paths.push_back(path.to_string_lossy().into_owned());
-            }
-            paths
-        })
-    })
-}
-
-fn get_file_path<D: Deque<String>>(path: &Path, ext: &str, paths: D) -> D {
-    if path.extension().and_then(|s| s.to_str()) == Some(ext) {
-        return paths.push_back(path.to_string_lossy().into_owned());
-    }
-    paths
-}
-
-fn get_source<D: Deque<String>>(input: Option<&str>, ext: &str, paths: D) -> Source<D> {
-    match input {
-        None => Source {
-            source_type: SourceType::Directory,
-            dir: "./".to_string(),
-            file_paths: get_file_paths(".", ext, paths),
-        },
-        Some(path_str) => {
-            let path = PathBuf::from(path_str);
-            if path.is_dir() {
-                Source {
-                    source_type: SourceType::Directory,
-                    dir: path_str.to_string(),
-                    file_paths: get_file_paths(path_str, ext, paths),
-                }
-            } else {
-                Source {
-                    source_type: SourceType::File,
-                    dir: path.parent().unwrap().to_string_lossy().into_owned(),
-                    file_paths: get_file_path(&path, ext, paths),
-                }
-            }
-        }
-    }
-}
-
-fn run(input: Option<&str>) {
-    let paths = BankersDeque::<String>::empty();
-    let source = get_source(input, "vm", paths);
-    let offset = if source.source_type == SourceType::Directory { 0 } else { 1 };
-
-    if source.file_paths.is_empty() {
-        eprintln!("Usage: vm <vm file name|dir name where vm files reside>");
-        process::exit(1);
-    }
-
-    let output = if source.dir == "./" {
-        let stem = if source.file_paths.len() == 1 {
-            PathBuf::from(source.file_paths.front().unwrap().as_str())
-                .file_stem()
-                .unwrap()
-                .to_string_lossy()
-                .into_owned()
-        } else {
-            "Main".to_string()
-        };
-        format!("{}.asm", stem)
-    } else {
-        let stem = PathBuf::from(source.dir.clone())
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
-            .into_owned();
-        format!("{}/{}.asm", source.dir, stem)
+fn run(argument: Option<String>) {
+    let source = match resolve::<BankersDeque<String>>(argument.as_deref(), "vm") {
+        Ok(source) => source,
+        Err(error) => abort(error, USAGE),
     };
+
+    // A folder is a whole program and gets bootstrap code; a lone file is a
+    // fragment and does not. Shifting the index past 0 suppresses it.
+    let offset = if source.kind == SourceKind::Folder {
+        0
+    } else {
+        1
+    };
+    let output = source.combined_output("asm");
 
     // Fold over the file paths, accumulating the results into an IO<CatenableDeque>
     source
-        .file_paths
+        .files
         .iter()
         .enumerate()
         .fold(
@@ -517,25 +444,12 @@ fn run(input: Option<&str>) {
             },
         )
         // After processing all files, write a single combined result
-        .flat_map(|assembly| {
-            let lines = assembly
-                .iter()
-                .map(|s| s.as_ref().clone())
-                .collect::<Vec<String>>()
-                .join("\n");
-            IO::<String>::write_file(output, lines)
-        })
+        .flat_map(|assembly| IO::<String>::write_file(output, join_lines(&assembly)))
         .unsafe_run()
         .unwrap_or_else(|e| panic!("Failed to process files: {}", e));
 }
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
-    const STACK_SIZE: usize = 16 * 1024 * 1024;
-    std::thread::Builder::new()
-        .stack_size(STACK_SIZE)
-        .spawn(move || run(if 1 < args.len() { Some(&args[1]) } else { None }))
-        .unwrap()
-        .join()
-        .unwrap();
+    let argument = cli::argument();
+    run_on_large_stack(move || run(argument));
 }

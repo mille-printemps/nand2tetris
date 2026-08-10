@@ -1,4 +1,4 @@
-use collections::{Empty, hashmap::HashMap};
+use collections::{hashmap::HashMap, Empty};
 
 pub fn symbol_table() -> HashMap<String, u32> {
     HashMap::empty()

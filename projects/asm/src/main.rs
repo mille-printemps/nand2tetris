@@ -1,13 +1,8 @@
+use cli::{abort, join_lines, process_file, resolve_file, run_on_large_stack, sibling_path};
 use collections::deque::*;
 use collections::hashmap::*;
-use collections::Empty;
-use functional::functor::*;
-use functional::io::*;
 use instruction::*;
 use parser::parser::*;
-use std::env;
-use std::path::PathBuf;
-use std::process;
 use translation::*;
 
 mod instruction;
@@ -95,56 +90,32 @@ fn assemble<'a, D: Deque<String>>(
         .map(|(_, _, code)| code)
 }
 
-fn run<D: Deque<String>>(input: String, output: String, code: D) {
-    IO::<String>::read_file(input)
-        .flat_map(|content| {
-            let assembly = content.lines().collect::<Vec<&str>>();
-            preprocess(&assembly).map_or_else(
-                |error| IO::Error(error.to_string()),
-                |symbol_table| {
-                    assemble::<D>(&assembly, symbol_table, code).map_or_else(
-                        |error| IO::Error(error.to_string()),
-                        |binary| {
-                            let lines = binary
-                                .iter()
-                                .map(|s| s.as_ref().clone())
-                                .collect::<Vec<String>>()
-                                .join("\n");
-                            IO::<String>::write_file(output, lines)
-                        },
-                    )
-                },
-            )
-        })
-        .unsafe_run()
-        .unwrap_or_else(|e| panic!("Failed to process a file: {}", e));
+const USAGE: &str = "<file.asm>";
+
+fn translate<D: Deque<String>>(source: &str) -> Result<String, String> {
+    let lines = source.lines().collect::<Vec<&str>>();
+    let symbol_table = preprocess(&lines).map_err(str::to_string)?;
+    let binary = assemble::<D>(&lines, symbol_table, D::empty()).map_err(str::to_string)?;
+    Ok(join_lines(&binary))
+}
+
+fn run(argument: Option<String>) {
+    let source = match resolve_file::<BankersDeque<String>>(argument.as_deref(), "asm") {
+        Ok(source) => source,
+        Err(error) => abort(error, USAGE),
+    };
+    let input = (*source
+        .files
+        .front()
+        .expect("a resolved file source has one file"))
+    .clone();
+    let output = sibling_path(&input, ".hack");
+    process_file(input, output, |content: String| {
+        translate::<BankersDeque<String>>(&content)
+    });
 }
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
-
-    if args.len() == 1 {
-        eprintln!("Usage: {} <asm file name>", &args[0]);
-        process::exit(1);
-    }
-
-    let output = format!(
-        "{}.hack",
-        PathBuf::from(&args[1])
-            .file_stem()
-            .unwrap()
-            .to_string_lossy()
-            .into_owned()
-    );
-
-    const STACK_SIZE: usize = 16 * 1024 * 1024;
-    std::thread::Builder::new()
-        .stack_size(STACK_SIZE)
-        .spawn(move || {
-            let code = BankersDeque::empty();
-            run(args[1].clone(), output, code)
-        })
-        .unwrap()
-        .join()
-        .unwrap();
+    let argument = cli::argument();
+    run_on_large_stack(move || run(argument));
 }

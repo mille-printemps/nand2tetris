@@ -9,3 +9,4 @@ edition = "2021"
 collections = {path = "../../lib/collections"}
 functional = {path = "../../lib/functional"}
 parser = {path = "../../lib/parser"}
+cli = {path = "../../lib/cli"}

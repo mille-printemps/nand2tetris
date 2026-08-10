@@ -3,16 +3,6 @@
 version = 3
 
 [[package]]
-name = "asm"
-version = "0.1.0"
-dependencies = [
- "cli",
- "collections",
- "functional",
- "parser",
-]
-
-[[package]]
 name = "cli"
 version = "0.1.0"
 dependencies = [
@@ -26,8 +16,4 @@ version = "0.1.0"
 
 [[package]]
 name = "functional"
-version = "0.1.0"
-
-[[package]]
-name = "parser"
 version = "0.1.0"
