@@ -1,16 +1,21 @@
-// Ok: a tuple of (<next string>, <extracted string>)
-// Err: a string to be parsed
-pub type ParseResult<'a, Output> = Result<(&'a str, Output), &'a str>;
+// Ok: a tuple of (<remaining input>, <extracted value>)
+// Err: what went wrong.
+
+// - Input defaults to &str
+// - Error defaults to Input itself
+// - A caller parsing something other than text (e.g. a token stream) can set Input explicitly
+// - A caller that wants labeled diagnostics instead of a bare "retry from here" can set Error to String
+pub type ParseResult<'a, Output, Input = &'a str, Error = Input> = Result<(Input, Output), Error>;
 
 // Pointer type of the parser that dynamically dispatches methods
-pub struct BoxedParser<'a, Output> {
-    parser: Box<dyn Parser<'a, Output> + 'a>,
+pub struct BoxedParser<'a, Output, Input = &'a str, Error = Input> {
+    parser: Box<dyn Parser<'a, Output, Input, Error> + 'a>,
 }
 
-impl<'a, Output> BoxedParser<'a, Output> {
+impl<'a, Output, Input, Error> BoxedParser<'a, Output, Input, Error> {
     fn new<P>(parser: P) -> Self
     where
-        P: Parser<'a, Output> + 'a,
+        P: Parser<'a, Output, Input, Error> + 'a,
     {
         BoxedParser {
             parser: Box::new(parser),
@@ -19,34 +24,43 @@ impl<'a, Output> BoxedParser<'a, Output> {
 }
 
 // Parser trait
-pub trait Parser<'a, Output> {
-    fn parse(&self, input: &'a str) -> ParseResult<'a, Output>;
+pub trait Parser<'a, Output, Input = &'a str, Error = Input> {
+    fn parse(&self, input: Input) -> ParseResult<'a, Output, Input, Error>;
 
-    fn map<F, NextOutput>(self, map_fn: F) -> BoxedParser<'a, NextOutput>
+    fn map<F, NextOutput>(self, map_fn: F) -> BoxedParser<'a, NextOutput, Input, Error>
     where
         Self: Sized + 'a,
         Output: 'a,
         NextOutput: 'a,
+        Input: 'a,
+        Error: 'a,
         F: Fn(Output) -> NextOutput + 'a,
     {
         BoxedParser::new(map(self, map_fn))
     }
 
-    fn pred<F>(self, pred_fn: F) -> BoxedParser<'a, Output>
+    fn pred<F>(self, pred_fn: F) -> BoxedParser<'a, Output, Input, Error>
     where
         Self: Sized + 'a,
         Output: 'a,
+        Input: Copy + 'a,
+        Error: From<Input> + 'a,
         F: Fn(&Output) -> bool + 'a,
     {
         BoxedParser::new(pred(self, pred_fn))
     }
 
-    fn and_then<F, NextParser, NextOutput>(self, then_fn: F) -> BoxedParser<'a, NextOutput>
+    fn and_then<F, NextParser, NextOutput>(
+        self,
+        then_fn: F,
+    ) -> BoxedParser<'a, NextOutput, Input, Error>
     where
         Self: Sized + 'a,
         Output: 'a,
         NextOutput: 'a,
-        NextParser: Parser<'a, NextOutput> + 'a,
+        Input: 'a,
+        Error: 'a,
+        NextParser: Parser<'a, NextOutput, Input, Error> + 'a,
         F: Fn(Output) -> NextParser + 'a,
     {
         BoxedParser::new(and_then(self, then_fn))
@@ -54,12 +68,12 @@ pub trait Parser<'a, Output> {
 }
 
 // Returns a parser that applies 'map_fn' to the result of the parser specified
-pub fn map<'a, P, F, A, B>(parser: P, map_fn: F) -> impl Parser<'a, B>
+pub fn map<'a, P, F, A, B, Input, Error>(parser: P, map_fn: F) -> impl Parser<'a, B, Input, Error>
 where
-    P: Parser<'a, A>,
+    P: Parser<'a, A, Input, Error>,
     F: Fn(A) -> B,
 {
-    move |input| {
+    move |input: Input| {
         parser
             .parse(input)
             .map(|(next_input, result)| (next_input, map_fn(result)))
@@ -68,47 +82,56 @@ where
 
 // Returns a parser that applies 'pred_fn' to the result of the parser specified,
 // and then returns its result if the predicate satisfies
-pub fn pred<'a, P, A, F>(parser: P, pred_fn: F) -> impl Parser<'a, A>
+pub fn pred<'a, P, A, F, Input, Error>(parser: P, pred_fn: F) -> impl Parser<'a, A, Input, Error>
 where
-    P: Parser<'a, A>,
+    P: Parser<'a, A, Input, Error>,
     F: Fn(&A) -> bool,
+    Input: Copy,
+    Error: From<Input>,
 {
-    move |input| {
+    move |input: Input| {
         if let Ok((next_input, value)) = parser.parse(input) {
             if pred_fn(&value) {
                 return Ok((next_input, value));
             }
         }
-        Err(input)
+        Err(input.into())
     }
 }
 
 // Returns a parser that applies 'then_fn' to the result of the parser specified to get the next parser,
 // and then, applies the next parser to the next input
-pub fn and_then<'a, P, F, A, B, NextParser>(parser: P, then_fn: F) -> impl Parser<'a, B>
+pub fn and_then<'a, P, F, A, B, NextParser, Input, Error>(
+    parser: P,
+    then_fn: F,
+) -> impl Parser<'a, B, Input, Error>
 where
-    P: Parser<'a, A>,
-    NextParser: Parser<'a, B>,
+    P: Parser<'a, A, Input, Error>,
+    NextParser: Parser<'a, B, Input, Error>,
     F: Fn(A) -> NextParser,
 {
-    move |input| match parser.parse(input) {
+    move |input: Input| match parser.parse(input) {
         Ok((next_input, result)) => then_fn(result).parse(next_input),
         Err(err) => Err(err),
     }
 }
 
 // Implementations of the parser trait
-impl<'a, Output> Parser<'a, Output> for BoxedParser<'a, Output> {
-    fn parse(&self, input: &'a str) -> ParseResult<'a, Output> {
+impl<'a, Output, Input, Error> Parser<'a, Output, Input, Error>
+    for BoxedParser<'a, Output, Input, Error>
+{
+    fn parse(&self, input: Input) -> ParseResult<'a, Output, Input, Error> {
         self.parser.parse(input)
     }
 }
 
-impl<'a, F, Output> Parser<'a, Output> for F
+// Any Fn(Input) -> ParseResult<Output, Input, Error> already is a Parser, whatever Input and Error are
+// This is what lets a plain recursive fn(&[Token]) -> ... satisfy the trait without a special case.
+impl<'a, F, Output, Input, Error> Parser<'a, Output, Input, Error> for F
 where
-    F: Fn(&'a str) -> ParseResult<Output>,
+    F: Fn(Input) -> ParseResult<'a, Output, Input, Error>,
 {
-    fn parse(&self, input: &'a str) -> ParseResult<'a, Output> {
+    fn parse(&self, input: Input) -> ParseResult<'a, Output, Input, Error> {
         self(input)
     }
 }
@@ -171,12 +194,15 @@ pub fn identifier(input: &str) -> ParseResult<String> {
     Ok((&input[next_index..], matched))
 }
 
-pub fn pair<'a, P1, P2, R1, R2>(parser1: P1, parser2: P2) -> impl Parser<'a, (R1, R2)>
+pub fn pair<'a, P1, P2, R1, R2, Input, Error>(
+    parser1: P1,
+    parser2: P2,
+) -> impl Parser<'a, (R1, R2), Input, Error>
 where
-    P1: Parser<'a, R1>,
-    P2: Parser<'a, R2>,
+    P1: Parser<'a, R1, Input, Error>,
+    P2: Parser<'a, R2, Input, Error>,
 {
-    move |input| {
+    move |input: Input| {
         parser1.parse(input).and_then(|(next_input, result1)| {
             parser2
                 .parse(next_input)
@@ -185,45 +211,57 @@ where
     }
 }
 
-pub fn left<'a, P1, P2, R1, R2>(parser1: P1, parser2: P2) -> impl Parser<'a, R1>
+pub fn left<'a, P1, P2, R1, R2, Input, Error>(
+    parser1: P1,
+    parser2: P2,
+) -> impl Parser<'a, R1, Input, Error>
 where
-    P1: Parser<'a, R1>,
-    P2: Parser<'a, R2>,
+    P1: Parser<'a, R1, Input, Error>,
+    P2: Parser<'a, R2, Input, Error>,
 {
     map(pair(parser1, parser2), |(left, _right)| left)
 }
 
-pub fn right<'a, P1, P2, R1, R2>(parser1: P1, parser2: P2) -> impl Parser<'a, R2>
+pub fn right<'a, P1, P2, R1, R2, Input, Error>(
+    parser1: P1,
+    parser2: P2,
+) -> impl Parser<'a, R2, Input, Error>
 where
-    P1: Parser<'a, R1>,
-    P2: Parser<'a, R2>,
+    P1: Parser<'a, R1, Input, Error>,
+    P2: Parser<'a, R2, Input, Error>,
 {
     map(pair(parser1, parser2), |(_left, right)| right)
 }
 
-pub fn either<'a, P1, P2, A>(parser1: P1, parser2: P2) -> impl Parser<'a, A>
+pub fn either<'a, P1, P2, A, Input, Error>(
+    parser1: P1,
+    parser2: P2,
+) -> impl Parser<'a, A, Input, Error>
 where
-    P1: Parser<'a, A>,
-    P2: Parser<'a, A>,
+    P1: Parser<'a, A, Input, Error>,
+    P2: Parser<'a, A, Input, Error>,
+    Input: Copy,
 {
-    move |input| match parser1.parse(input) {
+    move |input: Input| match parser1.parse(input) {
         ok @ Ok(_) => ok,
         Err(_) => parser2.parse(input),
     }
 }
 
-pub fn one_or_more<'a, P, A>(parser: P) -> impl Parser<'a, Vec<A>>
+pub fn one_or_more<'a, P, A, Input, Error>(parser: P) -> impl Parser<'a, Vec<A>, Input, Error>
 where
-    P: Parser<'a, A>,
+    P: Parser<'a, A, Input, Error>,
+    Input: Copy,
+    Error: From<Input>,
 {
-    move |mut input| {
+    move |mut input: Input| {
         let mut result = Vec::new();
 
         if let Ok((next_input, first_item)) = parser.parse(input) {
             input = next_input;
             result.push(first_item);
         } else {
-            return Err(input);
+            return Err(input.into());
         }
 
         while let Ok((next_input, next_item)) = parser.parse(input) {
@@ -235,11 +273,12 @@ where
     }
 }
 
-pub fn zero_or_more<'a, P, A>(parser: P) -> impl Parser<'a, Vec<A>>
+pub fn zero_or_more<'a, P, A, Input, Error>(parser: P) -> impl Parser<'a, Vec<A>, Input, Error>
 where
-    P: Parser<'a, A>,
+    P: Parser<'a, A, Input, Error>,
+    Input: Copy,
 {
-    move |mut input| {
+    move |mut input: Input| {
         let mut result = Vec::new();
 
         while let Ok((next_input, next_item)) = parser.parse(input) {
@@ -248,6 +287,24 @@ where
         }
 
         Ok((input, result))
+    }
+}
+
+// Wraps a parser, replacing a bare "retry from here" failure with a labeled message
+// The diagnostic a hand-written `expect_x` function would build inline (e.g. "expected 'if', found ...")
+// but reusable across grammars and still composable like any other parser.
+pub fn context<'a, P, A, Input, Error>(
+    parser: P,
+    label: String,
+) -> impl Parser<'a, A, Input, String>
+where
+    P: Parser<'a, A, Input, Error>,
+    Input: Copy + std::fmt::Debug,
+{
+    move |input: Input| {
+        parser
+            .parse(input)
+            .map_err(|_| format!("expected {}, found {:?}", label, input))
     }
 }
 

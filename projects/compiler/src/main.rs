@@ -5,6 +5,7 @@ use tokenizer::token::{tokenize, Token};
 mod ast;
 mod codegen;
 mod parser;
+mod recursive_descent;
 mod symbol_table;
 
 use codegen::compile_class;
