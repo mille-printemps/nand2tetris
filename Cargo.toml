@@ -1,0 +1,13 @@
+[workspace]
+resolver = "2"
+members = [
+    "projects/asm",
+    "projects/vm",
+    "projects/analyzer",
+    "projects/compiler",
+    "lib/parser",
+    "lib/collections",
+    "lib/functional",
+    "lib/cli",
+    "lib/tokenizer",
+]

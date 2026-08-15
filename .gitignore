@@ -2,3 +2,4 @@ tools/*
 *.pdf
 target
 firedbg
+build

@@ -84,11 +84,12 @@ impl<'a, A> IO<'a, A> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::file;
 
     #[test]
     fn file_reader() {
-        let file_io = IO::<String>::read_file(file!().to_string());
+        // An absolute path built from CARGO_MANIFEST_DIR, not file!()
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/src/io.rs").to_string();
+        let file_io = IO::<String>::read_file(path);
         let result = file_io.map(|content| content.to_uppercase()).unsafe_run();
         assert_eq!(true, result.unwrap().starts_with("USE"))
     }
