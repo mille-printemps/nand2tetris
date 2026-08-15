@@ -1,19 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Compiles a Jack program all the way to Hack machine code, chaining the
-# three tools below so you don't have to cd into each one:
+# Compiles a Jack program all the way to Hack machine code,
+# chaining the three tools below so you don't have to cd into each one:
 #   .jack -> (compiler) -> .vm -+
 #                                +-> (vm) -> .asm -> (asm) -> .hack
 #            tools/OS/*.vm -----+
 #
-# The OS's compiled .vm files (Math, String, Array, Output, Screen,
-# Keyboard, Memory, Sys) are staged alongside your program's .vm files
+# The OS's compiled .vm files are staged alongside your program's .vm files
 # before translation: the bootstrap code always emits `call Sys.init 0`,
-# and Sys.init calls Main.main, so without the OS there's nothing for the
-# bootstrap to jump to and the .hack would be incomplete.
-#
-# Usage: ./run-jack.sh projects/play/MyGame
+# and Sys.init calls Main.main.
 
 cd "$(dirname "$0")"
 
