@@ -1,7 +1,10 @@
 # nand2tetris in Rust
 
-Project 11 Pong running in the VM Emulator
-![Project 11 Pong running in the VM Emulator](assets/pong.gif)
+<p align="center">
+  <img src="assets/pong.gif" alt="Project 11 Pong running in the VM Emulator">
+  <br>
+  <em>Project 11 Pong running in the VM Emulator</em>
+</p>
 
 A Rust implementation of the [nand2tetris](https://www.nand2tetris.org/) software toolchain: a Hack assembler, a VM-to-assembly translator, a Jack tokenizer, and a Jack-to-VM compiler. The hardware track (projects 00–05) follows the course's own HDL/simulator tooling in `tools/`.
 
