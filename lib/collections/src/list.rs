@@ -14,6 +14,22 @@ impl<T> Default for List<T> {
     }
 }
 
+// Walk the chain by hand instead of dropping a List recurses into
+// ListNode's default Drop glue once per node:
+// try_unwrap only succeeds while we hold the last strong reference,
+// which is exactly when the recursive drop would otherwise happen
+impl<T> Drop for List<T> {
+    fn drop(&mut self) {
+        let mut node = std::mem::replace(&mut self.head, Ref::new(ListNode::Empty));
+        loop {
+            match Ref::try_unwrap(node) {
+                Ok(ListNode::Value { next_node, .. }) => node = next_node,
+                Ok(ListNode::Empty) | Err(_) => break,
+            }
+        }
+    }
+}
+
 impl<T> Clone for ListNode<T> {
     fn clone(&self) -> Self {
         match self {
@@ -213,6 +229,25 @@ impl<T> List<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Make sure that the default recursive drop glue never overflows the stack,
+    // even with a deliberately small stack size.
+    #[test]
+    fn test_drop_does_not_overflow_a_small_stack() {
+        let handle = std::thread::Builder::new()
+            .stack_size(64 * 1024) // 64KB — deliberately tiny
+            .spawn(|| {
+                let mut list = List::new();
+                for i in 0..1_000_000 {
+                    list = list.push_front(i);
+                }
+                drop(list);
+            })
+            .unwrap();
+        handle
+            .join()
+            .expect("dropping a long list should not overflow the stack");
+    }
 
     #[test]
     fn test_iter() {
