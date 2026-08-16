@@ -5,11 +5,11 @@ set -euo pipefail
 # chaining the three tools below so you don't have to cd into each one:
 #   .jack -> (compiler) -> .vm -+
 #                                +-> (vm) -> .asm -> (asm) -> .hack
-#            tools/OS/*.vm -----+
+#            tools/OS/*.vm -----+    (only if tools/OS exists)
 #
-# The OS's compiled .vm files are staged alongside your program's .vm files
-# before translation: the bootstrap code always emits `call Sys.init 0`,
-# and Sys.init calls Main.main.
+# When present, the OS's compiled .vm files are staged alongside your
+# program's .vm files before translation: the bootstrap code always emits
+# 'call Sys.init 0', and Sys.init calls Main.main.
 
 cd "$(dirname "$0")"
 
@@ -20,10 +20,18 @@ fi
 
 dir="$1"
 name="$(basename "$dir")"
-build_dir="$dir/build/$name"
 
 echo "==> compiling $dir"
 cargo run --release -p compiler -- "$dir"
+
+if [ ! -d tools/OS ]; then
+    echo
+    echo "tools/OS not found — stopping after compiling to .vm."
+    echo "Install the course tools into tools/ to translate and assemble."
+    exit 0
+fi
+
+build_dir="$dir/build/$name"
 
 echo "==> staging program + OS VM code in $build_dir"
 rm -rf "$build_dir"
