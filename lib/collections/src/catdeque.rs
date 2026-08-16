@@ -371,6 +371,25 @@ mod tests {
         assert_eq!(deque.back().map(|value| *value), model.back().copied());
     }
 
+    // Make sure that the default recursive drop glue never overflows the stack,
+    // even with a deliberately small stack size.
+    #[test]
+    fn test_drop_does_not_overflow_a_small_stack() {
+        let handle = std::thread::Builder::new()
+            .stack_size(64 * 1024) // 64KB — deliberately tiny
+            .spawn(|| {
+                let mut deque = CatenableDeque::empty();
+                for step in 0..20_000 {
+                    deque = deque.append(&build(&[step]));
+                }
+                drop(deque);
+            })
+            .unwrap();
+        handle
+            .join()
+            .expect("dropping a deeply left-nested spine should not overflow the stack");
+    }
+
     #[test]
     fn test_empty_deque() {
         let deque: CatenableDeque<i32> = CatenableDeque::empty();
